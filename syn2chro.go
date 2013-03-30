@@ -132,17 +132,6 @@ type Sync2ch_v1 struct {
 }
 
 var g_log *log.Logger
-var g_conf = Config{
-	Name:            "name",
-	Pass:            "pass",
-	Addr:            "",
-	Port:            80,
-	ReadTimeoutSec:  10,
-	WriteTimeoutSec: 10,
-	LogFilePath:     "",
-	ApiURL:          "/api/sync1",
-	DBPath:          "sync_data",
-}
 
 func main() {
 	c := readConfig()
@@ -760,13 +749,13 @@ func readConfig() Config {
 	}
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		// 強制終了したほうがいいかも
-		return g_conf
+		fmt.Fprintf(os.Stdout, "conf read error")
+		os.Exit(1)
 	}
 	err = json.Unmarshal(data, &c)
 	if err != nil {
-		// 強制終了したほうがいいかも
-		return g_conf
+		fmt.Fprintf(os.Stdout, "conf json error")
+		os.Exit(1)
 	}
 	return c
 }
