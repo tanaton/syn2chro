@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
@@ -69,6 +70,12 @@ type FileDBNumber struct {
 
 type SyncHandle struct {
 	conf Config
+}
+
+type Session struct {
+	w    http.ResponseWriter
+	wbuf *bufio.Writer
+	r    *http.Request
 	user User
 	db   DB
 }
@@ -150,13 +157,6 @@ func main() {
 
 	myHandler := &SyncHandle{
 		conf: c,
-		user: &OneUser{
-			name: c.Name,
-			pass: c.Pass,
-		},
-		db: &FileDB{
-			root: c.DBPath,
-		},
 	}
 	server := &http.Server{
 		Addr:           fmt.Sprintf("%s:%d", c.Addr, int(c.Port)),
@@ -171,45 +171,53 @@ func main() {
 }
 
 func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ses := &Session{
+		w:    w,
+		wbuf: bufio.NewWriterSize(w, 1024*1024),
+		r:    r,
+		user: &OneUser{
+			name: h.conf.Name,
+			pass: h.conf.Pass,
+		},
+		db: &FileDB{
+			root: h.conf.DBPath,
+		},
+	}
+
 	if r.Method != "POST" {
-		w.WriteHeader(http.StatusNotImplemented) // 501 POSTしか実装していない
-		h.logging(r, http.StatusNotImplemented)
+		ses.statusCode(http.StatusNotImplemented) // 501 POSTしか実装していない
 		return
 	}
 	if r.URL.Path != h.conf.ApiURL {
-		w.WriteHeader(http.StatusNotFound) // 404 そんなもんはねーよ
-		h.logging(r, http.StatusNotFound)
+		ses.statusCode(http.StatusNotFound) // 404 そんなもんはねーよ
 		return
 	}
 
 	// 認証
-	name, pass, err := h.auth(r)
+	name, pass, err := ses.auth()
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized) // 401 認証失敗
-		h.logging(r, http.StatusUnauthorized)
+		ses.statusCode(http.StatusUnauthorized) // 401 認証失敗
 		return
 	}
 
 	// リクエスト取得
-	reqdata, err := h.getRequestData(r)
+	reqdata, err := ses.getRequestData()
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest) // 400 お前のリクエストが悪い
-		h.logging(r, http.StatusBadRequest)
+		ses.statusCode(http.StatusBadRequest) // 400 お前のリクエストが悪い
 		return
 	}
 	g_log.Print(string(reqdata))
 
 	// ユーザーごとのパスを取得
-	path, _ := h.user.GetPath(name, pass)
+	path, _ := ses.user.GetPath(name, pass)
 	// DBから最新の同期情報を取得
-	motodata, err := h.db.GetData(path)
+	motodata, err := ses.db.GetData(path)
 	if err != nil {
-		if h.db.GetSyncNumber(path) < 0 {
+		if ses.db.GetSyncNumber(path) < 0 {
 			motodata = nil
 		} else {
 			// 初期同期じゃないのにデータの読み込みに失敗
-			w.WriteHeader(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-			h.logging(r, http.StatusInternalServerError)
+			ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
 			g_log.Printf("%v", err)
 			return
 		}
@@ -220,55 +228,55 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d1, d2, err := sync.Merge(motodata, reqdata)
 	if err != nil {
 		// 解析に失敗
-		w.WriteHeader(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		h.logging(r, http.StatusInternalServerError)
+		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
 		g_log.Printf("%v", err)
 		return
 	}
 
 	// 同期番号の保存
-	err = h.db.SetSyncNumber(path, sync.save.SyncNum)
+	err = ses.db.SetSyncNumber(path, sync.save.SyncNum)
 	if err != nil {
 		// データの保存に失敗
-		w.WriteHeader(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		h.logging(r, http.StatusInternalServerError)
+		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
 		g_log.Printf("%v", err)
 		return
 	}
 	// データの保存
-	err = h.db.SetData(path, d1)
+	err = ses.db.SetData(path, d1)
 	if err != nil {
 		// データの保存に失敗
-		w.WriteHeader(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		h.logging(r, http.StatusInternalServerError)
+		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
 		g_log.Printf("%v", err)
 		return
 	}
 
 	// クライアントへ送信
-	err = h.send(w, r, d2)
+	err = ses.send(d2)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		h.logging(r, http.StatusInternalServerError)
+		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
 		g_log.Printf("%v", err)
 		return
 	}
 	g_log.Print(string(d2))
-	h.logging(r, http.StatusOK)
+	ses.statusCode(http.StatusOK)
+	// データの送信
+	ses.wbuf.Flush()
 }
 
-func (h *SyncHandle) logging(r *http.Request, code int) {
-	g_log.Printf("%s - \"%s %s %s\" %d %d", r.RemoteAddr, r.Method, r.RequestURI, r.Proto, code, r.ContentLength)
+func (ses *Session) statusCode(code int) {
+	// ステータスコード出力
+	ses.w.WriteHeader(code)
+	g_log.Printf("%s - \"%s %s %s\" %d %d", ses.r.RemoteAddr, ses.r.Method, ses.r.RequestURI, ses.r.Proto, code, ses.r.ContentLength)
 }
 
-func (h *SyncHandle) auth(r *http.Request) (name, pass string, err error) {
+func (ses *Session) auth() (name, pass string, err error) {
 	// 認証
-	auth := r.Header.Get("Authorization")
+	auth := ses.r.Header.Get("Authorization")
 	if len(auth) > 6 && auth[:6] == "Basic " {
 		deco, err64 := base64.StdEncoding.DecodeString(auth[6:])
 		if err64 == nil {
 			list := strings.SplitN(string(deco), ":", 2)
-			if h.user.Auth(list[0], list[1]) {
+			if ses.user.Auth(list[0], list[1]) {
 				name = list[0]
 				pass = list[1]
 				err = nil
@@ -285,10 +293,10 @@ func (h *SyncHandle) auth(r *http.Request) (name, pass string, err error) {
 	return
 }
 
-func (h *SyncHandle) getRequestData(r *http.Request) (data []byte, readerr error) {
-	if r.Header.Get("Encoding") == "gzip" {
+func (ses *Session) getRequestData() (data []byte, readerr error) {
+	if ses.r.Header.Get("Encoding") == "gzip" {
 		// データが圧縮されているかも
-		zip, err := gzip.NewReader(r.Body)
+		zip, err := gzip.NewReader(ses.r.Body)
 		if err == nil {
 			defer zip.Close()
 			data, readerr = ioutil.ReadAll(zip)
@@ -297,18 +305,18 @@ func (h *SyncHandle) getRequestData(r *http.Request) (data []byte, readerr error
 		}
 	} else {
 		// 普通に読み込む
-		data, readerr = ioutil.ReadAll(r.Body)
+		data, readerr = ioutil.ReadAll(ses.r.Body)
 	}
 	return
 }
 
-func (h *SyncHandle) send(w http.ResponseWriter, r *http.Request, data []byte) (reterr error) {
-	if r.Header.Get("Accespt-Encoding") == "gzip" {
+func (ses *Session) send(data []byte) (reterr error) {
+	if ses.r.Header.Get("Accespt-Encoding") == "gzip" {
 		// 圧縮して送る
-		wfp, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		wfp, err := gzip.NewWriterLevel(ses.wbuf, gzip.BestSpeed)
 		if err == nil {
 			defer wfp.Close()
-			w.Header().Set("Content-Encoding", "gzip")
+			ses.w.Header().Set("Content-Encoding", "gzip")
 			wfp.Write([]byte(xml.Header))
 			wfp.Write(data)
 		} else {
@@ -316,8 +324,8 @@ func (h *SyncHandle) send(w http.ResponseWriter, r *http.Request, data []byte) (
 		}
 	} else {
 		// 普通に送る
-		w.Write([]byte(xml.Header))
-		w.Write(data)
+		ses.wbuf.Write([]byte(xml.Header))
+		ses.wbuf.Write(data)
 	}
 	return
 }
@@ -403,15 +411,12 @@ func (v1 *Sync2ch_v1) mergeReq() {
 // 全部none
 func (v1 *Sync2ch_v1) createUpdateRes() {
 	add := []ThreadGroup{}
-	v1.load.TgMap = convertMap(v1.load.Tg)
 	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
 		add = append(add, createUpdateResThreadGroup(re, key))
 	}
-	// 番号の更新
-	v1.save.SyncNum++
-	v1.res.SyncNum = v1.save.SyncNum
 	v1.res.Tg = add
+	v1.updateSyncNumber()
 }
 
 // リクエストのSyncNumberが古い場合
@@ -427,10 +432,14 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 			// 最新版には無いカテゴリーのもよう
 		}
 	}
+	v1.res.Tg = add
+	v1.updateSyncNumber()
+}
+
+func (v1 *Sync2ch_v1) updateSyncNumber() {
 	// 番号の更新
 	v1.save.SyncNum++
 	v1.res.SyncNum = v1.save.SyncNum
-	v1.res.Tg = add
 }
 
 // ちゃんとしたDBとかに後々対応できるように…
