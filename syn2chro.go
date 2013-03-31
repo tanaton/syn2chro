@@ -51,6 +51,7 @@ type Config struct {
 	LogFilePath     string  `json:"ログファイルパス"`
 	ApiURL          string  `json:"APIのURL"`
 	DBPath          string  `json:"データベースファイルのルートパス"`
+	DebugPrint		bool	`json:"デバッグ出力"`
 }
 
 // 1ユーザー専用認証機
@@ -139,6 +140,7 @@ type Sync2ch_v1 struct {
 }
 
 var g_log *log.Logger
+var g_debug bool
 
 func main() {
 	c := readConfig()
@@ -154,6 +156,7 @@ func main() {
 		w = fp
 	}
 	g_log = log.New(w, "", log.Ldate|log.Ltime|log.Lmicroseconds)
+	g_debug = c.DebugPrint
 
 	myHandler := &SyncHandle{
 		conf: c,
@@ -206,7 +209,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ses.statusCode(http.StatusBadRequest) // 400 お前のリクエストが悪い
 		return
 	}
-	g_log.Print(string(reqdata))
+	debugPrint(string(reqdata))
 
 	// ユーザーごとのパスを取得
 	path, _ := ses.user.GetPath(name, pass)
@@ -218,7 +221,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// 初期同期じゃないのにデータの読み込みに失敗
 			ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-			g_log.Printf("%v", err)
+			debugPrint(err.Error())
 			return
 		}
 	}
@@ -229,7 +232,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// 解析に失敗
 		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		g_log.Printf("%v", err)
+		debugPrint(err.Error())
 		return
 	}
 
@@ -238,7 +241,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// データの保存に失敗
 		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		g_log.Printf("%v", err)
+		debugPrint(err.Error())
 		return
 	}
 	// データの保存
@@ -246,7 +249,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// データの保存に失敗
 		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		g_log.Printf("%v", err)
+		debugPrint(err.Error())
 		return
 	}
 
@@ -254,10 +257,10 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = ses.send(d2)
 	if err != nil {
 		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		g_log.Printf("%v", err)
+		debugPrint(err.Error())
 		return
 	}
-	g_log.Print(string(d2))
+	debugPrint(string(d2))
 	ses.statusCode(http.StatusOK)
 	// データの送信
 	ses.wbuf.Flush()
@@ -768,3 +771,10 @@ func readConfig() Config {
 	}
 	return c
 }
+
+func debugPrint(str string) {
+	if g_debug {
+		g_log.Print(str)
+	}
+}
+
