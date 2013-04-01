@@ -563,14 +563,12 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 	v1.load.TgMap = convertMap(v1.load.Tg)
 	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
-		if it, ok := v1.load.TgMap[key]; ok {
-			add = append(add, createSyncResThreadGroup(it, re, key))
-		} else {
+		it, ok := v1.load.TgMap[key]
+		if !ok {
 			// 最新版には無いカテゴリーのもよう
-			add = append(add, ThreadGroup_v1{
-				Cate: key,
-			})
+			it = re
 		}
+		add = append(add, createSyncResThreadGroup(it, re, key))
 	}
 	v1.res.Tg = add
 	v1.res.SyncNum = v1.save.SyncNum
