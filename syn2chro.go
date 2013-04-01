@@ -14,8 +14,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -51,7 +51,7 @@ type Config struct {
 	WriteTimeoutSec float64 `json:"書き込みタイムアウト秒"`
 	LogFilePath     string  `json:"ログファイルパス"`
 	DBPath          string  `json:"データベースファイルのルートパス"`
-	DebugPrint		bool	`json:"デバッグ出力"`
+	DebugPrint      bool    `json:"デバッグ出力"`
 }
 
 // 1ユーザー専用認証機
@@ -146,15 +146,15 @@ type Sync2ch_v1 struct {
 // Sync2ch Version2
 /////////////////////////////////////////////////////////////////////
 type Thread_v2 struct {
-	Id     int    `xml:"id,attr,omitempty"`
-	Status string `xml:"s,attr,omitempty"`
-	Url    string `xml:"url,attr,omitempty"`
-	Title  string `xml:"title,attr,omitempty"`
-	Read   int    `xml:"read,attr,omitempty"`
-	Now    int    `xml:"now,attr,omitempty"`
-	Count  int    `xml:"count,attr,omitempty"`
-	ReadTime int  `xml:"rt,attr,omitempty"`
-	PostTime int  `xml:"pt,attr,omitempty"`
+	Id       int    `xml:"id,attr,omitempty"`
+	Status   string `xml:"s,attr,omitempty"`
+	Url      string `xml:"url,attr,omitempty"`
+	Title    string `xml:"title,attr,omitempty"`
+	Read     int    `xml:"read,attr,omitempty"`
+	Now      int    `xml:"now,attr,omitempty"`
+	Count    int    `xml:"count,attr,omitempty"`
+	ReadTime int    `xml:"rt,attr,omitempty"`
+	PostTime int    `xml:"pt,attr,omitempty"`
 }
 
 type Board_v2 struct {
@@ -573,6 +573,7 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 		}
 	}
 	v1.res.Tg = add
+	v1.res.SyncNum = v1.save.SyncNum
 }
 
 func (v1 *Sync2ch_v1) updateSyncNumber() {
@@ -785,13 +786,30 @@ func createSyncResThread(load, req *Thread_v1) Thread_v1 {
 	if req == nil {
 		ret.Status = "a"
 		ret.Title = (*load).Title
-		ret.Read = (*load).Read
-		ret.Now = (*load).Now
+		if (*load).Read > 0 {
+			ret.Read = (*load).Read
+		} else {
+			ret.Read = 1
+		}
+		if (*load).Now > 0 {
+			ret.Now = (*load).Now
+		} else {
+			ret.Now = 1
+		}
 		ret.Count = (*load).Count
 	} else if req.Read != (*load).Read || req.Now != (*load).Now || req.Count != (*load).Count {
 		ret.Status = "u"
-		ret.Read = (*load).Read
-		ret.Now = (*load).Now
+		ret.Title = (*load).Title
+		if (*load).Read > 0 {
+			ret.Read = (*load).Read
+		} else {
+			ret.Read = 1
+		}
+		if (*load).Now > 0 {
+			ret.Now = (*load).Now
+		} else {
+			ret.Now = 1
+		}
 		ret.Count = (*load).Count
 	} else {
 		ret.Status = "n"
@@ -915,4 +933,3 @@ func debugPrint(str string) {
 		g_log.Print(str)
 	}
 }
-
