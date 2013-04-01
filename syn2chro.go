@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"strconv"
 	"time"
 )
 
@@ -49,9 +50,8 @@ type Config struct {
 	ReadTimeoutSec  float64 `json:"読み込みタイムアウト秒"`
 	WriteTimeoutSec float64 `json:"書き込みタイムアウト秒"`
 	LogFilePath     string  `json:"ログファイルパス"`
-	ApiURL          string  `json:"APIのURL"`
 	DBPath          string  `json:"データベースファイルのルートパス"`
-	DebugPrint      bool    `json:"デバッグ出力"`
+	DebugPrint		bool	`json:"デバッグ出力"`
 }
 
 // 1ユーザー専用認証機
@@ -81,7 +81,10 @@ type Session struct {
 	db   DB
 }
 
-type Thread struct {
+/////////////////////////////////////////////////////////////////////
+// Sync2ch Version1
+/////////////////////////////////////////////////////////////////////
+type Thread_v1 struct {
 	Status string `xml:"s,attr,omitempty"`
 	Url    string `xml:"url,attr"`
 	Title  string `xml:"title,attr,omitempty"`
@@ -90,54 +93,136 @@ type Thread struct {
 	Count  int    `xml:"count,attr,omitempty"`
 }
 
-type Board struct {
+type Board_v1 struct {
 	Url   string `xml:"url,attr"`
 	Title string `xml:"title,attr"`
 }
 
-type Dir struct {
-	Name       string   `xml:"name,attr"`
-	ThreadList []Thread `xml:"thread"`
-	BoardList  []Board  `xml:"board"`
-	DirList    []Dir    `xml:"dir"` // 入れ子にできる
+type Dir_v1 struct {
+	Name       string      `xml:"name,attr"`
+	ThreadList []Thread_v1 `xml:"thread"`
+	BoardList  []Board_v1  `xml:"board"`
+	DirList    []Dir_v1    `xml:"dir"` // 入れ子にできる
 }
 
-type ThreadGroup struct {
-	Cate       string   `xml:"category,attr"`
-	ThreadList []Thread `xml:"thread"`
-	BoardList  []Board  `xml:"board"`
-	DirList    []Dir    `xml:"dir"`
+type ThreadGroup_v1 struct {
+	Cate       string      `xml:"category,attr"`
+	ThreadList []Thread_v1 `xml:"thread"`
+	BoardList  []Board_v1  `xml:"board"`
+	DirList    []Dir_v1    `xml:"dir"`
 }
 
-type GroupMap struct {
-	tm map[string]Thread
-	bm map[string]Board
-	dm map[string]GroupMap
+type GroupMap_v1 struct {
+	tm map[string]Thread_v1
+	bm map[string]Board_v1
+	dm map[string]GroupMap_v1
 }
 
-type Request struct {
-	XMLName    xml.Name            `xml:"sync2ch_request"`
-	SyncNum    int                 `xml:"sync_number,attr"`
-	ClientVer  string              `xml:"client_version,attr"`
-	ClientName string              `xml:"client_name,attr"`
-	Os         string              `xml:"os,attr"`
-	Tg         []ThreadGroup       `xml:"thread_group"`
-	TgMap      map[string]GroupMap `xml:"-"`
+type Request_v1 struct {
+	XMLName    xml.Name               `xml:"sync2ch_request"`
+	SyncNum    int                    `xml:"sync_number,attr"`
+	ClientVer  string                 `xml:"client_version,attr"`
+	ClientName string                 `xml:"client_name,attr"`
+	Os         string                 `xml:"os,attr"`
+	Tg         []ThreadGroup_v1       `xml:"thread_group"`
+	TgMap      map[string]GroupMap_v1 `xml:"-"`
 }
 
-type Response struct {
-	XMLName xml.Name            `xml:"sync2ch_response"`
-	SyncNum int                 `xml:"sync_number,attr"`
-	Tg      []ThreadGroup       `xml:"thread_group"`
-	TgMap   map[string]GroupMap `xml:"-"`
+type Response_v1 struct {
+	XMLName xml.Name               `xml:"sync2ch_response"`
+	SyncNum int                    `xml:"sync_number,attr"`
+	Tg      []ThreadGroup_v1       `xml:"thread_group"`
+	TgMap   map[string]GroupMap_v1 `xml:"-"`
 }
 
 type Sync2ch_v1 struct {
-	load Request
-	req  Request
-	save Request
-	res  Response
+	load Request_v1
+	req  Request_v1
+	save Request_v1
+	res  Response_v1
 }
+
+/////////////////////////////////////////////////////////////////////
+// Sync2ch Version2
+/////////////////////////////////////////////////////////////////////
+type Thread_v2 struct {
+	Id     int    `xml:"id,attr,omitempty"`
+	Status string `xml:"s,attr,omitempty"`
+	Url    string `xml:"url,attr,omitempty"`
+	Title  string `xml:"title,attr,omitempty"`
+	Read   int    `xml:"read,attr,omitempty"`
+	Now    int    `xml:"now,attr,omitempty"`
+	Count  int    `xml:"count,attr,omitempty"`
+	ReadTime int  `xml:"rt,attr,omitempty"`
+	PostTime int  `xml:"pt,attr,omitempty"`
+}
+
+type Board_v2 struct {
+	Id    int    `xml:"id,attr,omitempty"`
+	Url   string `xml:"url,attr,omitempty"`
+	Title string `xml:"title,attr,omitempty"`
+}
+
+type Dir_v2 struct {
+	Name       string      `xml:"name,attr"`
+	IdList     string      `xml:"id_list,attr"`
+	Status     string      `xml:"s,attr"`
+	ThreadList []Thread_v2 `xml:"th"`
+	BoardList  []Board_v2  `xml:"bd"`
+	DirList    []Dir_v2    `xml:"dir"` // 入れ子にできる
+}
+
+type ThreadGroup_v2 struct {
+	Cate       string      `xml:"category,attr"`
+	IdList     string      `xml:"id_list,attr"`
+	Status     string      `xml:"s,attr"`
+	ThreadList []Thread_v2 `xml:"th"`
+	BoardList  []Board_v2  `xml:"bd"`
+	DirList    []Dir_v2    `xml:"dir"`
+}
+
+type Entities_v2 struct {
+	ThreadList []Thread_v2 `xml:"th"`
+	BoardList  []Board_v2  `xml:"bd"`
+}
+
+type GroupMap_v2 struct {
+	tm map[string]Thread_v2
+	bm map[string]Board_v2
+	dm map[string]GroupMap_v2
+}
+
+type Request_v2 struct {
+	XMLName    xml.Name               `xml:"sync2ch_request"`
+	SyncNum    int                    `xml:"sync_number,attr"`
+	ClientId   string                 `xml:"client_id,attr"`
+	ClientName string                 `xml:"client_name,attr"`
+	ClientVer  string                 `xml:"client_version,attr"`
+	Os         string                 `xml:"os,attr"`
+	Device     string                 `xml:"device,attr"`
+	SyncRes    string                 `xml:"sync_rl,attr"`
+	Tg         []ThreadGroup_v2       `xml:"thread_group"`
+	Entities   Entities_v2            `xml:"entities"`
+	TgMap      map[string]GroupMap_v2 `xml:"-"`
+}
+
+type Response_v2 struct {
+	XMLName  xml.Name               `xml:"sync2ch_response"`
+	SyncNum  int                    `xml:"sync_number,attr"`
+	Result   string                 `xml:"result,attr"`
+	Tg       []ThreadGroup_v2       `xml:"thread_group"`
+	Entities Entities_v2            `xml:"entities"`
+	TgMap    map[string]GroupMap_v2 `xml:"-"`
+}
+
+type Sync2ch_v2 struct {
+	load Request_v2
+	req  Request_v2
+	save Request_v2
+	res  Response_v2
+}
+
+/////////////////////////////////////////////////////////////////////
 
 var g_log *log.Logger
 var g_debug bool
@@ -187,27 +272,45 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if r.Method != "POST" {
-		ses.statusCode(http.StatusNotImplemented) // 501 POSTしか実装していない
-		return
+	// Version1
+	code, err := ses.execVer1()
+	//code, err := ses.execVer2()
+	ses.statusCode(code)
+	if err != nil {
+		debugPrint(err.Error())
 	}
-	if r.URL.Path != h.conf.ApiURL {
-		ses.statusCode(http.StatusNotFound) // 404 そんなもんはねーよ
-		return
-	}
+	// データの送信
+	ses.wbuf.Flush()
+}
 
+func (ses *Session) execVer1() (code int, reterr error) {
 	// 認証
 	name, pass, err := ses.auth()
-	if err != nil {
-		ses.statusCode(http.StatusUnauthorized) // 401 認証失敗
-		return
+	if err == nil {
+		// 認証成功
+		switch ses.r.URL.Path {
+		case "/api/sync1":
+			// 同期する
+			if ses.r.Method == "POST" {
+				code, reterr = ses.execVer1Sync(name, pass)
+			} else {
+				code = http.StatusNotImplemented // 501
+			}
+		default:
+			code = http.StatusNotFound // 404
+		}
+	} else {
+		// 認証失敗
+		code, reterr = http.StatusUnauthorized, err // 401
 	}
+	return
+}
 
+func (ses *Session) execVer1Sync(name, pass string) (int, error) {
 	// リクエスト取得
 	reqdata, err := ses.getRequestData()
 	if err != nil {
-		ses.statusCode(http.StatusBadRequest) // 400 お前のリクエストが悪い
-		return
+		return http.StatusBadRequest, err // 400
 	}
 	debugPrint(string(reqdata))
 
@@ -220,9 +323,7 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			motodata = nil
 		} else {
 			// 初期同期じゃないのにデータの読み込みに失敗
-			ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-			debugPrint(err.Error())
-			return
+			return http.StatusInternalServerError, err // 500
 		}
 	}
 
@@ -230,46 +331,79 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sync := &Sync2ch_v1{}
 	d1, d2, err := sync.Merge(motodata, reqdata)
 	if err != nil {
-		// 解析に失敗
-		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		debugPrint(err.Error())
-		return
+		return http.StatusInternalServerError, err // 500
 	}
 
 	// 同期番号の保存
 	err = ses.db.SetSyncNumber(path, sync.save.SyncNum)
 	if err != nil {
-		// データの保存に失敗
-		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		debugPrint(err.Error())
-		return
+		return http.StatusInternalServerError, err // 500
 	}
 	// データの保存
 	err = ses.db.SetData(path, d1)
 	if err != nil {
-		// データの保存に失敗
-		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		debugPrint(err.Error())
-		return
+		return http.StatusInternalServerError, err // 500
 	}
 
 	// クライアントへ送信
 	err = ses.send(d2)
 	if err != nil {
-		ses.statusCode(http.StatusInternalServerError) // 500 サーバーさん調子悪い
-		debugPrint(err.Error())
-		return
+		return http.StatusInternalServerError, err // 500
 	}
 	debugPrint(string(d2))
-	ses.statusCode(http.StatusOK)
-	// データの送信
-	ses.wbuf.Flush()
+
+	return http.StatusOK, nil
+}
+
+func (ses *Session) execVer2() (code int, reterr error) {
+	// 認証
+	name, pass, err := ses.auth()
+	if err == nil {
+		// 認証成功
+		switch ses.r.URL.Path {
+		case "/api/sync2":
+			// 同期する
+			if ses.r.Method == "POST" {
+				code, reterr = ses.execVer2Sync(name, pass)
+			} else {
+				code = http.StatusNotImplemented // 501
+			}
+		case "/api/auth2":
+			// クライアントID発行
+			if ses.r.Method == "GET" {
+				code, reterr = ses.execVer2Auth(name, pass)
+			} else {
+				code = http.StatusNotImplemented // 501
+			}
+		default:
+			code = http.StatusNotFound
+		}
+	} else {
+		// 認証失敗
+		code, reterr = http.StatusUnauthorized, err // 401
+	}
+	return
+}
+
+func (ses *Session) execVer2Sync(name, pass string) (int, error) {
+	return http.StatusInternalServerError, errors.New("Not implemented")
+}
+
+func (ses *Session) execVer2Auth(name, pass string) (code int, reterr error) {
+	id, err := ses.user.GetId(name, pass)
+	if err == nil {
+		ses.w.Header().Set("Sync2ch-Client-ID", strconv.Itoa(id))
+		code, reterr = http.StatusOK, nil // 200
+	} else {
+		code, reterr = http.StatusUnauthorized, err // 401
+	}
+	return
 }
 
 func (ses *Session) statusCode(code int) {
 	// ステータスコード出力
 	ses.w.WriteHeader(code)
-	g_log.Printf("%s - \"%s %s %s\" %d %d", ses.r.RemoteAddr, ses.r.Method, ses.r.RequestURI, ses.r.Proto, code, ses.r.ContentLength)
+	g_log.Printf("%s - \"%s %s %s\" code:%d in:%d out:%d", ses.r.RemoteAddr, ses.r.Method, ses.r.RequestURI, ses.r.Proto, code, ses.r.ContentLength, ses.wbuf.Buffered())
 }
 
 func (ses *Session) auth() (name, pass string, err error) {
@@ -392,7 +526,7 @@ func (v1 *Sync2ch_v1) update() {
 func (v1 *Sync2ch_v1) mergeReq() {
 	m := make(map[string]int)
 	if v1.save.Tg == nil {
-		v1.save.Tg = []ThreadGroup{}
+		v1.save.Tg = []ThreadGroup_v1{}
 	}
 	for i, it := range v1.save.Tg {
 		m[it.Cate] = i
@@ -413,7 +547,7 @@ func (v1 *Sync2ch_v1) mergeReq() {
 // リクエストのSyncNumberが同じ場合
 // 全部none
 func (v1 *Sync2ch_v1) createUpdateRes() {
-	add := []ThreadGroup{}
+	add := []ThreadGroup_v1{}
 	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
 		add = append(add, createUpdateResThreadGroup(re, key))
@@ -425,7 +559,7 @@ func (v1 *Sync2ch_v1) createUpdateRes() {
 // リクエストのSyncNumberが古い場合
 // 同期する
 func (v1 *Sync2ch_v1) createSyncRes() {
-	add := []ThreadGroup{}
+	add := []ThreadGroup_v1{}
 	v1.load.TgMap = convertMap(v1.load.Tg)
 	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
@@ -433,7 +567,9 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 			add = append(add, createSyncResThreadGroup(it, re, key))
 		} else {
 			// 最新版には無いカテゴリーのもよう
-			add = append(add, ThreadGroup{Cate: key})
+			add = append(add, ThreadGroup_v1{
+				Cate: key,
+			})
 		}
 	}
 	v1.res.Tg = add
@@ -538,8 +674,8 @@ func (ou *OneUser) GetId(name, pass string) (int, error) {
 	return 1, nil // ユーザーは一人しか居ないので
 }
 
-func convertMap(tglist []ThreadGroup) map[string]GroupMap {
-	tgmap := make(map[string]GroupMap)
+func convertMap(tglist []ThreadGroup_v1) map[string]GroupMap_v1 {
+	tgmap := make(map[string]GroupMap_v1)
 	if tglist == nil {
 		return tgmap
 	}
@@ -549,11 +685,11 @@ func convertMap(tglist []ThreadGroup) map[string]GroupMap {
 	return tgmap
 }
 
-func convertMapTg(tg ThreadGroup) GroupMap {
-	gm := GroupMap{
-		tm: make(map[string]Thread),
-		bm: make(map[string]Board),
-		dm: make(map[string]GroupMap),
+func convertMapTg(tg ThreadGroup_v1) GroupMap_v1 {
+	gm := GroupMap_v1{
+		tm: make(map[string]Thread_v1),
+		bm: make(map[string]Board_v1),
+		dm: make(map[string]GroupMap_v1),
 	}
 	if tg.ThreadList != nil {
 		for _, it := range tg.ThreadList {
@@ -567,7 +703,7 @@ func convertMapTg(tg ThreadGroup) GroupMap {
 	}
 	if tg.DirList != nil {
 		for _, it := range tg.DirList {
-			gm.dm[it.Name] = convertMapTg(ThreadGroup{
+			gm.dm[it.Name] = convertMapTg(ThreadGroup_v1{
 				ThreadList: it.ThreadList,
 				BoardList:  it.BoardList,
 				DirList:    it.DirList,
@@ -577,16 +713,16 @@ func convertMapTg(tg ThreadGroup) GroupMap {
 	return gm
 }
 
-func createUpdateResDir(req GroupMap, name string) Dir {
-	data := Dir{
+func createUpdateResDir(req GroupMap_v1, name string) Dir_v1 {
+	data := Dir_v1{
 		Name: name,
 	}
-	t := []Thread{}
-	b := []Board{}
-	d := []Dir{}
+	t := []Thread_v1{}
+	b := []Board_v1{}
+	d := []Dir_v1{}
 
 	for _, it := range req.tm {
-		t = append(t, Thread{
+		t = append(t, Thread_v1{
 			Url:    it.Url,
 			Status: "n",
 		})
@@ -610,16 +746,16 @@ func createUpdateResDir(req GroupMap, name string) Dir {
 	return data
 }
 
-func createUpdateResThreadGroup(req GroupMap, key string) ThreadGroup {
-	data := ThreadGroup{
+func createUpdateResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
+	data := ThreadGroup_v1{
 		Cate: key,
 	}
-	t := []Thread{}
-	b := []Board{}
-	d := []Dir{}
+	t := []Thread_v1{}
+	b := []Board_v1{}
+	d := []Dir_v1{}
 
 	for _, it := range req.tm {
-		t = append(t, Thread{
+		t = append(t, Thread_v1{
 			Url:    it.Url,
 			Status: "n",
 		})
@@ -643,8 +779,8 @@ func createUpdateResThreadGroup(req GroupMap, key string) ThreadGroup {
 	return data
 }
 
-func createSyncResThread(load, req *Thread) Thread {
-	ret := Thread{
+func createSyncResThread(load, req *Thread_v1) Thread_v1 {
+	ret := Thread_v1{
 		Url: (*load).Url,
 	}
 	if req == nil {
@@ -664,13 +800,13 @@ func createSyncResThread(load, req *Thread) Thread {
 	return ret
 }
 
-func createSyncResDir(load, req *GroupMap, name string) Dir {
-	data := Dir{
+func createSyncResDir(load, req *GroupMap_v1, name string) Dir_v1 {
+	data := Dir_v1{
 		Name: name,
 	}
-	t := []Thread{}
-	b := []Board{}
-	d := []Dir{}
+	t := []Thread_v1{}
+	b := []Board_v1{}
+	d := []Dir_v1{}
 
 	if req == nil {
 		// リクエストには無いフォルダ
@@ -715,13 +851,13 @@ func createSyncResDir(load, req *GroupMap, name string) Dir {
 	return data
 }
 
-func createSyncResThreadGroup(load, req GroupMap, key string) ThreadGroup {
-	data := ThreadGroup{
+func createSyncResThreadGroup(load, req GroupMap_v1, key string) ThreadGroup_v1 {
+	data := ThreadGroup_v1{
 		Cate: key,
 	}
-	t := []Thread{}
-	b := []Board{}
-	d := []Dir{}
+	t := []Thread_v1{}
+	b := []Board_v1{}
+	d := []Dir_v1{}
 
 	for url, it := range load.tm {
 		if re, ok := req.tm[url]; ok {
@@ -780,3 +916,4 @@ func debugPrint(str string) {
 		g_log.Print(str)
 	}
 }
+
