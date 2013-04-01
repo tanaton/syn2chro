@@ -573,7 +573,6 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 		}
 	}
 	v1.res.Tg = add
-	v1.updateSyncNumber()
 }
 
 func (v1 *Sync2ch_v1) updateSyncNumber() {
