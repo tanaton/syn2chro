@@ -51,7 +51,7 @@ type Config struct {
 	LogFilePath     string  `json:"ログファイルパス"`
 	ApiURL          string  `json:"APIのURL"`
 	DBPath          string  `json:"データベースファイルのルートパス"`
-	DebugPrint		bool	`json:"デバッグ出力"`
+	DebugPrint      bool    `json:"デバッグ出力"`
 }
 
 // 1ユーザー専用認証機
@@ -433,6 +433,7 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 			add = append(add, createSyncResThreadGroup(it, re, key))
 		} else {
 			// 最新版には無いカテゴリーのもよう
+			add = append(add, ThreadGroup{Cate: key})
 		}
 	}
 	v1.res.Tg = add
@@ -651,10 +652,12 @@ func createSyncResThread(load, req *Thread) Thread {
 		ret.Title = (*load).Title
 		ret.Read = (*load).Read
 		ret.Now = (*load).Now
+		ret.Count = (*load).Count
 	} else if req.Read != (*load).Read || req.Now != (*load).Now || req.Count != (*load).Count {
 		ret.Status = "u"
 		ret.Read = (*load).Read
 		ret.Now = (*load).Now
+		ret.Count = (*load).Count
 	} else {
 		ret.Status = "n"
 	}
@@ -777,4 +780,3 @@ func debugPrint(str string) {
 		g_log.Print(str)
 	}
 }
-
