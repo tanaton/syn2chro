@@ -195,7 +195,7 @@ type GroupMap_v2 struct {
 type Request_v2 struct {
 	XMLName    xml.Name               `xml:"sync2ch_request"`
 	SyncNum    int                    `xml:"sync_number,attr"`
-	ClientId   string                 `xml:"client_id,attr"`
+	ClientId   int                    `xml:"client_id,attr"`
 	ClientName string                 `xml:"client_name,attr"`
 	ClientVer  string                 `xml:"client_version,attr"`
 	Os         string                 `xml:"os,attr"`
@@ -220,6 +220,7 @@ type Sync2ch_v2 struct {
 	req  Request_v2
 	save Request_v2
 	res  Response_v2
+	id   int
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -467,11 +468,132 @@ func (ses *Session) send(data []byte) (reterr error) {
 	return
 }
 
-func (v1 *Sync2ch_v1) Merge(src1, src2 []byte) (d1, d2 []byte, reterr error) {
-	if src2 == nil {
-		reterr = errors.New("nil")
+
+// ちゃんとしたDBとかに後々対応できるように…
+
+func (db *FileDB) GetSyncNumber(name string) int {
+	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
+	filedata, err := ioutil.ReadFile(p)
+	if err != nil {
+		return -1
+	}
+	dbn := FileDBNumber{}
+	err = json.Unmarshal(filedata, &dbn)
+	if err != nil {
+		return -1
+	}
+	return int(dbn.SyncNum)
+}
+
+func (db *FileDB) SetSyncNumber(name string, num int) (reterr error) {
+	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
+	dbn := FileDBNumber{
+		SyncNum: float64(num),
+	}
+	var data []byte
+	data, reterr = json.MarshalIndent(&dbn, "", "\t")
+	if reterr != nil {
 		return
 	}
+	reterr = db.checkPath(p)
+	if reterr != nil {
+		return
+	}
+	reterr = ioutil.WriteFile(p, data, 0744)
+	if reterr != nil {
+		return
+	}
+	return nil
+}
+
+func (db *FileDB) GetData(name string) ([]byte, error) {
+	var data []byte
+	p, err := db.createPath(name)
+	if err == nil {
+		data, err = ioutil.ReadFile(p)
+	}
+	return data, err
+}
+
+func (db *FileDB) SetData(name string, data []byte) error {
+	p, err := db.createPath(name)
+	if err == nil {
+		err = ioutil.WriteFile(p, data, 0744)
+	}
+	return err
+}
+
+func (db *FileDB) createPath(name string) (string, error) {
+	num := db.GetSyncNumber(name)
+	if num < 0 {
+		return "", errors.New("sync number error")
+	}
+	p := fmt.Sprintf("%s/%s/%s_%d.xml", db.root, name, FILE_DB_PREFIX, num)
+	return p, db.checkPath(p)
+}
+
+func (db *FileDB) checkPath(path string) (reterr error) {
+	dir := filepath.Dir(path)
+	_, reterr = os.Stat(dir)
+	if reterr != nil {
+		reterr = os.MkdirAll(dir, 0744)
+	}
+	return
+}
+
+// マルチユーザーに後々対応できるように…
+
+func (ou *OneUser) Auth(name, pass string) bool {
+	return name == ou.name && pass == ou.pass
+}
+
+func (ou *OneUser) GetPath(name, pass string) (string, error) {
+	if ou.Auth(name, pass) == false {
+		return "", errors.New("auth error")
+	}
+	return name, nil
+}
+
+func (ou *OneUser) GetId(name, pass string) (int, error) {
+	if ou.Auth(name, pass) == false {
+		return 0, errors.New("auth error")
+	}
+	return 1, nil // ユーザーは一人しか居ないので
+}
+
+func readConfig() Config {
+	c := Config{}
+	argc := len(os.Args)
+	var path string
+	if argc == 2 {
+		path = os.Args[1]
+	} else {
+		path = CONFIG_JSON_PATH_DEF
+	}
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "conf read error")
+		os.Exit(1)
+	}
+	err = json.Unmarshal(data, &c)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "conf json error")
+		os.Exit(1)
+	}
+	return c
+}
+
+func debugPrint(str string) {
+	if g_debug {
+		g_log.Print(str)
+	}
+}
+
+
+/////////////////////////////////////////////////////////////////////
+// Sync2ch Version1
+/////////////////////////////////////////////////////////////////////
+func (v1 *Sync2ch_v1) Merge(src1, src2 []byte) (d1, d2 []byte, reterr error) {
 	// バイト列から変換
 	reterr = xml.Unmarshal(src2, &v1.req)
 	if reterr != nil {
@@ -571,6 +693,7 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 		add = append(add, createSyncResThreadGroup(it, re, key))
 	}
 	v1.res.Tg = add
+	// TODO:SyncNumの更新条件を確認
 	v1.res.SyncNum = v1.save.SyncNum
 }
 
@@ -578,98 +701,6 @@ func (v1 *Sync2ch_v1) updateSyncNumber() {
 	// 番号の更新
 	v1.save.SyncNum++
 	v1.res.SyncNum = v1.save.SyncNum
-}
-
-// ちゃんとしたDBとかに後々対応できるように…
-
-func (db *FileDB) GetSyncNumber(name string) int {
-	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
-	filedata, err := ioutil.ReadFile(p)
-	if err != nil {
-		return -1
-	}
-	dbn := FileDBNumber{}
-	err = json.Unmarshal(filedata, &dbn)
-	if err != nil {
-		return -1
-	}
-	return int(dbn.SyncNum)
-}
-
-func (db *FileDB) SetSyncNumber(name string, num int) (reterr error) {
-	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
-	dbn := FileDBNumber{
-		SyncNum: float64(num),
-	}
-	var data []byte
-	data, reterr = json.MarshalIndent(&dbn, "", "\t")
-	if reterr != nil {
-		return
-	}
-	reterr = db.checkPath(p)
-	if reterr != nil {
-		return
-	}
-	reterr = ioutil.WriteFile(p, data, 0744)
-	if reterr != nil {
-		return
-	}
-	return nil
-}
-
-func (db *FileDB) GetData(name string) ([]byte, error) {
-	var data []byte
-	p, err := db.createPath(name)
-	if err == nil {
-		data, err = ioutil.ReadFile(p)
-	}
-	return data, err
-}
-
-func (db *FileDB) SetData(name string, data []byte) error {
-	p, err := db.createPath(name)
-	if err == nil {
-		err = ioutil.WriteFile(p, data, 0744)
-	}
-	return err
-}
-
-func (db *FileDB) createPath(name string) (string, error) {
-	num := db.GetSyncNumber(name)
-	if num < 0 {
-		return "", errors.New("sync number error")
-	}
-	p := fmt.Sprintf("%s/%s/%s_%d.xml", db.root, name, FILE_DB_PREFIX, num)
-	return p, db.checkPath(p)
-}
-
-func (db *FileDB) checkPath(path string) (reterr error) {
-	dir := filepath.Dir(path)
-	_, reterr = os.Stat(dir)
-	if reterr != nil {
-		reterr = os.MkdirAll(dir, 0744)
-	}
-	return
-}
-
-// マルチユーザーに後々対応できるように…
-
-func (ou *OneUser) Auth(name, pass string) bool {
-	return name == ou.name && pass == ou.pass
-}
-
-func (ou *OneUser) GetPath(name, pass string) (string, error) {
-	if ou.Auth(name, pass) == false {
-		return "", errors.New("auth error")
-	}
-	return name, nil
-}
-
-func (ou *OneUser) GetId(name, pass string) (int, error) {
-	if ou.Auth(name, pass) == false {
-		return 0, errors.New("auth error")
-	}
-	return 1, nil // ユーザーは一人しか居ないので
 }
 
 func convertMap(tglist []ThreadGroup_v1) map[string]GroupMap_v1 {
@@ -712,9 +743,6 @@ func convertMapTg(tg ThreadGroup_v1) GroupMap_v1 {
 }
 
 func createUpdateResDir(req GroupMap_v1, name string) Dir_v1 {
-	data := Dir_v1{
-		Name: name,
-	}
 	t := []Thread_v1{}
 	b := []Board_v1{}
 	d := []Dir_v1{}
@@ -732,6 +760,9 @@ func createUpdateResDir(req GroupMap_v1, name string) Dir_v1 {
 		d = append(d, createUpdateResDir(it, name))
 	}
 
+	data := Dir_v1{
+		Name: name,
+	}
 	if len(t) > 0 {
 		data.ThreadList = t
 	}
@@ -745,9 +776,6 @@ func createUpdateResDir(req GroupMap_v1, name string) Dir_v1 {
 }
 
 func createUpdateResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
-	data := ThreadGroup_v1{
-		Cate: key,
-	}
 	t := []Thread_v1{}
 	b := []Board_v1{}
 	d := []Dir_v1{}
@@ -765,6 +793,9 @@ func createUpdateResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
 		d = append(d, createUpdateResDir(it, name))
 	}
 
+	data := ThreadGroup_v1{
+		Cate: key,
+	}
 	if len(t) > 0 {
 		data.ThreadList = t
 	}
@@ -783,20 +814,13 @@ func createSyncResThread(load, req *Thread_v1) Thread_v1 {
 	}
 	if req == nil {
 		ret.Status = "a"
-		ret.Title = (*load).Title
-		if (*load).Read > 0 {
-			ret.Read = (*load).Read
-		} else {
-			ret.Read = 1
-		}
-		if (*load).Now > 0 {
-			ret.Now = (*load).Now
-		} else {
-			ret.Now = 1
-		}
-		ret.Count = (*load).Count
 	} else if req.Read != (*load).Read || req.Now != (*load).Now || req.Count != (*load).Count {
 		ret.Status = "u"
+	} else {
+		ret.Status = "n"
+	}
+
+	if ret.Status == "a" || ret.Status == "u" {
 		ret.Title = (*load).Title
 		if (*load).Read > 0 {
 			ret.Read = (*load).Read
@@ -809,22 +833,20 @@ func createSyncResThread(load, req *Thread_v1) Thread_v1 {
 			ret.Now = 1
 		}
 		ret.Count = (*load).Count
-	} else {
-		ret.Status = "n"
 	}
 	return ret
 }
 
 func createSyncResDir(load, req *GroupMap_v1, name string) Dir_v1 {
-	data := Dir_v1{
-		Name: name,
-	}
-	t := []Thread_v1{}
-	b := []Board_v1{}
-	d := []Dir_v1{}
+	var t []Thread_v1
+	var b []Board_v1
+	var d []Dir_v1
 
 	if req == nil {
 		// リクエストには無いフォルダ
+		t = []Thread_v1{}
+		b = []Board_v1{}
+		d = []Dir_v1{}
 		for _, it := range (*load).tm {
 			t = append(t, createSyncResThread(&it, nil))
 		}
@@ -835,25 +857,19 @@ func createSyncResDir(load, req *GroupMap_v1, name string) Dir_v1 {
 			d = append(d, createSyncResDir(&it, nil, name))
 		}
 	} else {
-		for url, it := range (*load).tm {
-			if re, ok := (*req).tm[url]; ok {
-				t = append(t, createSyncResThread(&it, &re))
-			} else {
-				t = append(t, createSyncResThread(&it, nil))
-			}
-		}
-		for _, it := range (*load).bm {
-			b = append(b, it)
-		}
-		for name, it := range (*load).dm {
-			if re, ok := (*req).dm[name]; ok {
-				d = append(d, createSyncResDir(&it, &re, name))
-			} else {
-				d = append(d, createSyncResDir(&it, nil, name))
-			}
-		}
+		// サーバ側のアイテム
+		t, b, d = mergeGroup(*load, *req)
+		// リクエスト側にのみ存在するアイテム
+		tmp_req := (*req).diff(*load)
+		t2, b2, d2 := mergeGroup(tmp_req, *req)
+		t = append(t, t2...)
+		b = append(b, b2...)
+		d = append(d, d2...)
 	}
 
+	data := Dir_v1{
+		Name: name,
+	}
 	if len(t) > 0 {
 		data.ThreadList = t
 	}
@@ -867,9 +883,31 @@ func createSyncResDir(load, req *GroupMap_v1, name string) Dir_v1 {
 }
 
 func createSyncResThreadGroup(load, req GroupMap_v1, key string) ThreadGroup_v1 {
+	// サーバ側のアイテム
+	t, b, d := mergeGroup(load, req)
+	// リクエスト側にのみ存在するアイテム
+	tmp_req := req.diff(load)
+	t2, b2, d2 := mergeGroup(tmp_req, req)
+	t = append(t, t2...)
+	b = append(b, b2...)
+	d = append(d, d2...)
+
 	data := ThreadGroup_v1{
 		Cate: key,
 	}
+	if len(t) > 0 {
+		data.ThreadList = t
+	}
+	if len(b) > 0 {
+		data.BoardList = b
+	}
+	if len(d) > 0 {
+		data.DirList = d
+	}
+	return data
+}
+
+func mergeGroup(load, req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
 	t := []Thread_v1{}
 	b := []Board_v1{}
 	d := []Dir_v1{}
@@ -892,42 +930,54 @@ func createSyncResThreadGroup(load, req GroupMap_v1, key string) ThreadGroup_v1 
 		}
 	}
 
-	if len(t) > 0 {
-		data.ThreadList = t
-	}
-	if len(b) > 0 {
-		data.BoardList = b
-	}
-	if len(d) > 0 {
-		data.DirList = d
-	}
-	return data
+	return t, b, d
 }
 
-func readConfig() Config {
-	c := Config{}
-	argc := len(os.Args)
-	var path string
-	if argc == 2 {
-		path = os.Args[1]
-	} else {
-		path = CONFIG_JSON_PATH_DEF
+func (m GroupMap_v1) diff(src GroupMap_v1) GroupMap_v1 {
+	tmp := m.clone()
+	for url, _ := range src.tm {
+		delete(tmp.tm, url)
 	}
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "conf read error")
-		os.Exit(1)
+	for url, _ := range src.bm {
+		delete(tmp.bm, url)
 	}
-	err = json.Unmarshal(data, &c)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "conf json error")
-		os.Exit(1)
+	for name, it := range src.dm {
+		if re, ok := tmp.dm[name]; ok {
+			di := re.diff(it)
+			if di.isEmpty() {
+				delete(tmp.dm, name)
+			} else {
+				tmp.dm[name] = di
+			}
+		}
 	}
-	return c
+	return tmp
 }
 
-func debugPrint(str string) {
-	if g_debug {
-		g_log.Print(str)
+func (m GroupMap_v1) clone() GroupMap_v1 {
+	ret := GroupMap_v1{
+		tm: make(map[string]Thread_v1),
+		bm: make(map[string]Board_v1),
+		dm: make(map[string]GroupMap_v1),
 	}
+	for key, it := range m.tm {
+		ret.tm[key] = it
+	}
+	for key, it := range m.bm {
+		ret.bm[key] = it
+	}
+	for key, it := range m.dm {
+		ret.dm[key] = it.clone()
+	}
+	return ret
 }
+
+func (m GroupMap_v1) isEmpty() bool {
+	return len(m.tm) == 0 && len(m.bm) == 0 && len(m.dm) == 0
+}
+
+
+/////////////////////////////////////////////////////////////////////
+// Sync2ch Version2
+/////////////////////////////////////////////////////////////////////
+
