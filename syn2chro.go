@@ -630,19 +630,27 @@ func (v1 *Sync2ch_v1) update() {
 	v1.save = v1.load
 	if v1.load.SyncNum == v1.req.SyncNum {
 		// 情報の更新
+		v1.req.TgMap = convertMap(v1.req.Tg)
 		v1.createUpdateRes()
 		v1.mergeReq()
 	} else if v1.load.SyncNum > v1.req.SyncNum {
 		// 同期
+		v1.load.TgMap = convertMap(v1.load.Tg)
+		v1.req.TgMap = convertMap(v1.req.Tg)
 		v1.createSyncRes()
+		v1.mergeReqDiff()
 	} else {
 		// サーバの方が小さい番号になることはありえないはず…
 		// とりあえず大きい数字に更新
 		v1.load.SyncNum = v1.req.SyncNum
 		v1.save.SyncNum = v1.req.SyncNum
+		v1.req.TgMap = convertMap(v1.req.Tg)
 		v1.createUpdateRes()
 		v1.mergeReq()
 	}
+	v1.save.ClientVer = v1.req.ClientVer
+	v1.save.ClientName = v1.req.ClientName
+	v1.save.Os = v1.req.Os
 }
 
 func (v1 *Sync2ch_v1) mergeReq() {
@@ -661,16 +669,103 @@ func (v1 *Sync2ch_v1) mergeReq() {
 			v1.save.Tg = append(v1.save.Tg, it)
 		}
 	}
-	v1.save.ClientVer = v1.req.ClientVer
-	v1.save.ClientName = v1.req.ClientName
-	v1.save.Os = v1.req.Os
+}
+
+func (v1 *Sync2ch_v1) mergeReqDiff() {
+	m := make(map[string]int)
+	if v1.save.Tg == nil {
+		v1.save.Tg = []ThreadGroup_v1{}
+	}
+	for i, it := range v1.save.Tg {
+		m[it.Cate] = i
+	}
+	for _, it := range v1.req.Tg {
+		if index, ok := m[it.Cate]; ok {
+			sm := convertMapTg(v1.save.Tg[index])
+			if rm, rmok := v1.req.TgMap[it.Cate]; rmok {
+				tmp := rm.diff(sm)
+				mergeThreadGroup(&(v1.save.Tg[index]), tmp)
+			}
+		} else {
+			// 後ろに伸びるだけだからインデックスは狂わないはず
+			v1.save.Tg = append(v1.save.Tg, it)
+		}
+	}
+}
+
+func mergeThreadGroup(tg *ThreadGroup_v1, gm GroupMap_v1) {
+	m := make(map[string]int)
+	for i, it := range (*tg).DirList {
+		m[it.Name] = i
+	}
+
+	for _, it := range gm.tm {
+		if (*tg).ThreadList == nil {
+			(*tg).ThreadList = []Thread_v1{it}
+		} else {
+			(*tg).ThreadList = append((*tg).ThreadList, it)
+		}
+	}
+	for _, it := range gm.bm {
+		if (*tg).BoardList == nil {
+			(*tg).BoardList = []Board_v1{it}
+		} else {
+			(*tg).BoardList = append((*tg).BoardList, it)
+		}
+	}
+	for name, it := range gm.dm {
+		if index, ok := m[name]; ok {
+			mergeDir(&((*tg).DirList[index]), it)
+		} else {
+			dir := Dir_v1{Name: name}
+			mergeDir(&dir, it)
+			(*tg).DirList = append((*tg).DirList, dir)
+		}
+	}
+	if len((*tg).DirList) == 0 {
+		(*tg).DirList = nil
+	}
+}
+
+func mergeDir(tg *Dir_v1, gm GroupMap_v1) {
+	m := make(map[string]int)
+	(*tg).DirList = []Dir_v1{}
+	for i, it := range (*tg).DirList {
+		m[it.Name] = i
+	}
+
+	for _, it := range gm.tm {
+		if (*tg).ThreadList == nil {
+			(*tg).ThreadList = []Thread_v1{it}
+		} else {
+			(*tg).ThreadList = append((*tg).ThreadList, it)
+		}
+	}
+	for _, it := range gm.bm {
+		if (*tg).BoardList == nil {
+			(*tg).BoardList = []Board_v1{it}
+		} else {
+			(*tg).BoardList = append((*tg).BoardList, it)
+		}
+	}
+	for name, it := range gm.dm {
+		if index, ok := m[name]; ok {
+			mergeDir(&((*tg).DirList[index]), it)
+		} else {
+			dir := Dir_v1{Name: name}
+			mergeDir(&dir, it)
+			(*tg).DirList = append((*tg).DirList, dir)
+		}
+	}
+	if len((*tg).DirList) == 0 {
+		(*tg).DirList = nil
+	}
 }
 
 // リクエストのSyncNumberが同じ場合
 // 全部none
 func (v1 *Sync2ch_v1) createUpdateRes() {
 	add := []ThreadGroup_v1{}
-	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
 		add = append(add, createUpdateResThreadGroup(re, key))
 	}
@@ -682,8 +777,6 @@ func (v1 *Sync2ch_v1) createUpdateRes() {
 // 同期する
 func (v1 *Sync2ch_v1) createSyncRes() {
 	add := []ThreadGroup_v1{}
-	v1.load.TgMap = convertMap(v1.load.Tg)
-	v1.req.TgMap = convertMap(v1.req.Tg)
 	for key, re := range v1.req.TgMap {
 		it, ok := v1.load.TgMap[key]
 		if !ok {
@@ -694,7 +787,8 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 	}
 	v1.res.Tg = add
 	// TODO:SyncNumの更新条件を確認
-	v1.res.SyncNum = v1.save.SyncNum
+	//v1.res.SyncNum = v1.save.SyncNum
+	v1.updateSyncNumber()
 }
 
 func (v1 *Sync2ch_v1) updateSyncNumber() {
