@@ -468,7 +468,6 @@ func (ses *Session) send(data []byte) (reterr error) {
 	return
 }
 
-
 // ちゃんとしたDBとかに後々対応できるように…
 
 func (db *FileDB) GetSyncNumber(name string) int {
@@ -589,7 +588,6 @@ func debugPrint(str string) {
 	}
 }
 
-
 /////////////////////////////////////////////////////////////////////
 // Sync2ch Version1
 /////////////////////////////////////////////////////////////////////
@@ -631,33 +629,30 @@ func (v1 *Sync2ch_v1) update() {
 	if v1.load.SyncNum == v1.req.SyncNum {
 		// 情報の更新
 		v1.req.TgMap = convertMap(v1.req.Tg)
-		v1.createUpdateRes()
-		v1.mergeReq()
+		v1.createResponseUpdate()
+		v1.mergeRequest()
 	} else if v1.load.SyncNum > v1.req.SyncNum {
 		// 同期
 		v1.load.TgMap = convertMap(v1.load.Tg)
 		v1.req.TgMap = convertMap(v1.req.Tg)
-		v1.createSyncRes()
-		v1.mergeReqDiff()
+		v1.createResponseSync()
+		v1.mergeRequestDiff()
 	} else {
 		// サーバの方が小さい番号になることはありえないはず…
 		// とりあえず大きい数字に更新
 		v1.load.SyncNum = v1.req.SyncNum
 		v1.save.SyncNum = v1.req.SyncNum
 		v1.req.TgMap = convertMap(v1.req.Tg)
-		v1.createUpdateRes()
-		v1.mergeReq()
+		v1.createResponseUpdate()
+		v1.mergeRequest()
 	}
 	v1.save.ClientVer = v1.req.ClientVer
 	v1.save.ClientName = v1.req.ClientName
 	v1.save.Os = v1.req.Os
 }
 
-func (v1 *Sync2ch_v1) mergeReq() {
+func (v1 *Sync2ch_v1) mergeRequest() {
 	m := make(map[string]int)
-	if v1.save.Tg == nil {
-		v1.save.Tg = []ThreadGroup_v1{}
-	}
 	for i, it := range v1.save.Tg {
 		m[it.Cate] = i
 	}
@@ -671,20 +666,17 @@ func (v1 *Sync2ch_v1) mergeReq() {
 	}
 }
 
-func (v1 *Sync2ch_v1) mergeReqDiff() {
+func (v1 *Sync2ch_v1) mergeRequestDiff() {
 	m := make(map[string]int)
-	if v1.save.Tg == nil {
-		v1.save.Tg = []ThreadGroup_v1{}
-	}
 	for i, it := range v1.save.Tg {
 		m[it.Cate] = i
 	}
 	for _, it := range v1.req.Tg {
 		if index, ok := m[it.Cate]; ok {
-			sm := convertMapTg(v1.save.Tg[index])
+			sm := v1.save.Tg[index].convertGroupMap()
 			if rm, rmok := v1.req.TgMap[it.Cate]; rmok {
 				tmp := rm.diff(sm)
-				mergeThreadGroup(&(v1.save.Tg[index]), tmp)
+				(&(v1.save.Tg[index])).merge(tmp)
 			}
 		} else {
 			// 後ろに伸びるだけだからインデックスは狂わないはず
@@ -693,80 +685,12 @@ func (v1 *Sync2ch_v1) mergeReqDiff() {
 	}
 }
 
-func mergeThreadGroup(tg *ThreadGroup_v1, gm GroupMap_v1) {
-	m := make(map[string]int)
-	for i, it := range (*tg).DirList {
-		m[it.Name] = i
-	}
-
-	for _, it := range gm.tm {
-		if (*tg).ThreadList == nil {
-			(*tg).ThreadList = []Thread_v1{it}
-		} else {
-			(*tg).ThreadList = append((*tg).ThreadList, it)
-		}
-	}
-	for _, it := range gm.bm {
-		if (*tg).BoardList == nil {
-			(*tg).BoardList = []Board_v1{it}
-		} else {
-			(*tg).BoardList = append((*tg).BoardList, it)
-		}
-	}
-	for name, it := range gm.dm {
-		if index, ok := m[name]; ok {
-			mergeDir(&((*tg).DirList[index]), it)
-		} else {
-			dir := Dir_v1{Name: name}
-			mergeDir(&dir, it)
-			(*tg).DirList = append((*tg).DirList, dir)
-		}
-	}
-	if len((*tg).DirList) == 0 {
-		(*tg).DirList = nil
-	}
-}
-
-func mergeDir(tg *Dir_v1, gm GroupMap_v1) {
-	m := make(map[string]int)
-	for i, it := range (*tg).DirList {
-		m[it.Name] = i
-	}
-
-	for _, it := range gm.tm {
-		if (*tg).ThreadList == nil {
-			(*tg).ThreadList = []Thread_v1{it}
-		} else {
-			(*tg).ThreadList = append((*tg).ThreadList, it)
-		}
-	}
-	for _, it := range gm.bm {
-		if (*tg).BoardList == nil {
-			(*tg).BoardList = []Board_v1{it}
-		} else {
-			(*tg).BoardList = append((*tg).BoardList, it)
-		}
-	}
-	for name, it := range gm.dm {
-		if index, ok := m[name]; ok {
-			mergeDir(&((*tg).DirList[index]), it)
-		} else {
-			dir := Dir_v1{Name: name}
-			mergeDir(&dir, it)
-			(*tg).DirList = append((*tg).DirList, dir)
-		}
-	}
-	if len((*tg).DirList) == 0 {
-		(*tg).DirList = nil
-	}
-}
-
 // リクエストのSyncNumberが同じ場合
 // 全部none
-func (v1 *Sync2ch_v1) createUpdateRes() {
+func (v1 *Sync2ch_v1) createResponseUpdate() {
 	add := []ThreadGroup_v1{}
 	for key, re := range v1.req.TgMap {
-		add = append(add, createUpdateResThreadGroup(re, key))
+		add = append(add, re.createUpdateResThreadGroup(key))
 	}
 	v1.res.Tg = add
 	v1.updateSyncNumber()
@@ -774,7 +698,7 @@ func (v1 *Sync2ch_v1) createUpdateRes() {
 
 // リクエストのSyncNumberが古い場合
 // 同期する
-func (v1 *Sync2ch_v1) createSyncRes() {
+func (v1 *Sync2ch_v1) createResponseSync() {
 	add := []ThreadGroup_v1{}
 	for key, re := range v1.req.TgMap {
 		it, ok := v1.load.TgMap[key]
@@ -782,7 +706,7 @@ func (v1 *Sync2ch_v1) createSyncRes() {
 			// 最新版には無いカテゴリーのもよう
 			it = re
 		}
-		add = append(add, createSyncResThreadGroup(it, re, key))
+		add = append(add, it.createSyncResThreadGroup(re, key))
 	}
 	v1.res.Tg = add
 	// TODO:SyncNumの更新条件を確認
@@ -798,77 +722,53 @@ func (v1 *Sync2ch_v1) updateSyncNumber() {
 
 func convertMap(tglist []ThreadGroup_v1) map[string]GroupMap_v1 {
 	tgmap := make(map[string]GroupMap_v1)
-	if tglist == nil {
-		return tgmap
-	}
 	for _, it := range tglist {
-		tgmap[it.Cate] = convertMapTg(it)
+		tgmap[it.Cate] = it.convertGroupMap()
 	}
 	return tgmap
 }
 
-func convertMapTg(tg ThreadGroup_v1) GroupMap_v1 {
+func (tg ThreadGroup_v1) convertGroupMap() GroupMap_v1 {
 	gm := GroupMap_v1{
 		tm: make(map[string]Thread_v1),
 		bm: make(map[string]Board_v1),
 		dm: make(map[string]GroupMap_v1),
 	}
-	if tg.ThreadList != nil {
-		for _, it := range tg.ThreadList {
-			gm.tm[it.Url] = it
-		}
+	for _, it := range tg.ThreadList {
+		gm.tm[it.Url] = it
 	}
-	if tg.BoardList != nil {
-		for _, it := range tg.BoardList {
-			gm.bm[it.Url] = it
-		}
+	for _, it := range tg.BoardList {
+		gm.bm[it.Url] = it
 	}
-	if tg.DirList != nil {
-		for _, it := range tg.DirList {
-			gm.dm[it.Name] = convertMapTg(ThreadGroup_v1{
-				ThreadList: it.ThreadList,
-				BoardList:  it.BoardList,
-				DirList:    it.DirList,
-			})
-		}
+	for _, it := range tg.DirList {
+		gm.dm[it.Name] = (ThreadGroup_v1{
+			ThreadList: it.ThreadList,
+			BoardList:  it.BoardList,
+			DirList:    it.DirList,
+		}).convertGroupMap()
 	}
 	return gm
 }
 
-func createUpdateResDir(req GroupMap_v1, name string) Dir_v1 {
-	t := []Thread_v1{}
-	b := []Board_v1{}
-	d := []Dir_v1{}
-
-	for _, it := range req.tm {
-		t = append(t, Thread_v1{
-			Url:    it.Url,
-			Status: "n",
-		})
-	}
-	for _, it := range req.bm {
-		b = append(b, it)
-	}
-	for name, it := range req.dm {
-		d = append(d, createUpdateResDir(it, name))
-	}
-
+func (req GroupMap_v1) createUpdateResDir(name string) Dir_v1 {
 	data := Dir_v1{
 		Name: name,
 	}
-	if len(t) > 0 {
-		data.ThreadList = t
-	}
-	if len(b) > 0 {
-		data.BoardList = b
-	}
-	if len(d) > 0 {
-		data.DirList = d
-	}
+	t, b, d := req.createUpdateResList()
+	(&data).add(t, b, d)
 	return data
 }
 
-func createUpdateResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
+func (req GroupMap_v1) createUpdateResThreadGroup(key string) ThreadGroup_v1 {
+	data := ThreadGroup_v1{
+		Cate: key,
+	}
+	t, b, d := req.createUpdateResList()
+	(&data).add(t, b, d)
+	return data
+}
+
+func (req GroupMap_v1) createUpdateResList() ([]Thread_v1, []Board_v1, []Dir_v1) {
 	t := []Thread_v1{}
 	b := []Board_v1{}
 	d := []Dir_v1{}
@@ -882,144 +782,196 @@ func createUpdateResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
 	for _, it := range req.bm {
 		b = append(b, it)
 	}
-	for name, it := range req.dm {
-		d = append(d, createUpdateResDir(it, name))
+	for na, it := range req.dm {
+		d = append(d, it.createUpdateResDir(na))
 	}
-
-	data := ThreadGroup_v1{
-		Cate: key,
-	}
-	if len(t) > 0 {
-		data.ThreadList = t
-	}
-	if len(b) > 0 {
-		data.BoardList = b
-	}
-	if len(d) > 0 {
-		data.DirList = d
-	}
-	return data
+	return t, b, d
 }
 
-func createSyncResThread(load, req *Thread_v1) Thread_v1 {
+func (t Thread_v1) createSyncRes(req *Thread_v1) Thread_v1 {
 	ret := Thread_v1{
-		Url: (*load).Url,
+		Url: t.Url,
 	}
 	if req == nil {
 		ret.Status = "a"
-	} else if req.Read != (*load).Read || req.Now != (*load).Now || req.Count != (*load).Count {
+	} else if req.Read != t.Read || req.Now != t.Now || req.Count != t.Count {
 		ret.Status = "u"
 	} else {
 		ret.Status = "n"
 	}
 
 	if ret.Status == "a" || ret.Status == "u" {
-		ret.Title = (*load).Title
-		if (*load).Read > 0 {
-			ret.Read = (*load).Read
+		ret.Title = t.Title
+		if t.Read > 0 {
+			ret.Read = t.Read
 		} else {
 			ret.Read = 1
 		}
-		if (*load).Now > 0 {
-			ret.Now = (*load).Now
+		if t.Now > 0 {
+			ret.Now = t.Now
 		} else {
 			ret.Now = 1
 		}
-		ret.Count = (*load).Count
+		ret.Count = t.Count
 	}
 	return ret
 }
 
-func createSyncResDir(load, req *GroupMap_v1, name string) Dir_v1 {
+func (gm GroupMap_v1) createSyncResDir(req *GroupMap_v1, name string) Dir_v1 {
 	var t []Thread_v1
 	var b []Board_v1
 	var d []Dir_v1
+	data := Dir_v1{
+		Name: name,
+	}
 
 	if req == nil {
 		// リクエストには無いフォルダ
 		t = []Thread_v1{}
 		b = []Board_v1{}
 		d = []Dir_v1{}
-		for _, it := range (*load).tm {
-			t = append(t, createSyncResThread(&it, nil))
+		for _, it := range gm.tm {
+			t = append(t, it.createSyncRes(nil))
 		}
-		for _, it := range (*load).bm {
+		for _, it := range gm.bm {
 			b = append(b, it)
 		}
-		for name, it := range (*load).dm {
-			d = append(d, createSyncResDir(&it, nil, name))
+		for na, it := range gm.dm {
+			d = append(d, it.createSyncResDir(nil, na))
 		}
 	} else {
-		// サーバ側のアイテム
-		t, b, d = mergeGroup(*load, *req)
-		// リクエスト側にのみ存在するアイテム
-		tmp_req := (*req).diff(*load)
-		t2, b2, d2 := mergeGroup(tmp_req, *req)
-		t = append(t, t2...)
-		b = append(b, b2...)
-		d = append(d, d2...)
+		t, b, d = gm.createSyncResList(*req)
 	}
 
-	data := Dir_v1{
-		Name: name,
-	}
-	if len(t) > 0 {
-		data.ThreadList = t
-	}
-	if len(b) > 0 {
-		data.BoardList = b
-	}
-	if len(d) > 0 {
-		data.DirList = d
-	}
+	(&data).add(t, b, d)
 	return data
 }
 
-func createSyncResThreadGroup(load, req GroupMap_v1, key string) ThreadGroup_v1 {
-	// サーバ側のアイテム
-	t, b, d := mergeGroup(load, req)
-	// リクエスト側にのみ存在するアイテム
-	tmp_req := req.diff(load)
-	t2, b2, d2 := mergeGroup(tmp_req, req)
-	t = append(t, t2...)
-	b = append(b, b2...)
-	d = append(d, d2...)
-
+func (gm GroupMap_v1) createSyncResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
 	data := ThreadGroup_v1{
 		Cate: key,
 	}
-	if len(t) > 0 {
-		data.ThreadList = t
-	}
-	if len(b) > 0 {
-		data.BoardList = b
-	}
-	if len(d) > 0 {
-		data.DirList = d
-	}
+	t, b, d := gm.createSyncResList(req)
+	(&data).add(t, b, d)
 	return data
 }
 
-func mergeGroup(load, req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
+func (gm GroupMap_v1) createSyncResList(req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
+	// サーバ側のアイテム
+	t, b, d := gm.syncResItems(req)
+	// リクエスト側にのみ存在するアイテム
+	tmp_req := req.diff(gm)
+	t2, b2, d2 := tmp_req.syncResItems(req)
+	t = append(t, t2...)
+	b = append(b, b2...)
+	d = append(d, d2...)
+	return t, b, d
+}
+
+func (tg *ThreadGroup_v1) merge(gm GroupMap_v1) {
+	m := make(map[string]int)
+	for i, it := range tg.DirList {
+		m[it.Name] = i
+	}
+
+	for _, it := range gm.tm {
+		tg.ThreadList = append(tg.ThreadList, it)
+	}
+	for _, it := range gm.bm {
+		tg.BoardList = append(tg.BoardList, it)
+	}
+	for name, it := range gm.dm {
+		if index, ok := m[name]; ok {
+			(&(tg.DirList[index])).merge(it)
+		} else {
+			dir := Dir_v1{Name: name}
+			(&dir).merge(it)
+			tg.DirList = append(tg.DirList, dir)
+		}
+	}
+	if len((*tg).DirList) == 0 {
+		tg.DirList = nil
+	}
+}
+
+func (di *Dir_v1) merge(gm GroupMap_v1) {
+	m := make(map[string]int)
+	for i, it := range di.DirList {
+		m[it.Name] = i
+	}
+
+	for _, it := range gm.tm {
+		di.ThreadList = append(di.ThreadList, it)
+	}
+	for _, it := range gm.bm {
+		di.BoardList = append(di.BoardList, it)
+	}
+	for name, it := range gm.dm {
+		if index, ok := m[name]; ok {
+			(&(di.DirList[index])).merge(it)
+		} else {
+			dir := Dir_v1{Name: name}
+			(&dir).merge(it)
+			di.DirList = append(di.DirList, dir)
+		}
+	}
+	if len(di.DirList) == 0 {
+		di.DirList = nil
+	}
+}
+
+func (tg *ThreadGroup_v1) add(t []Thread_v1, b []Board_v1, d []Dir_v1) {
+	tg.ThreadList = nil
+	tg.BoardList = nil
+	tg.DirList = nil
+
+	if len(t) > 0 {
+		tg.ThreadList = t
+	}
+	if len(b) > 0 {
+		tg.BoardList = b
+	}
+	if len(d) > 0 {
+		tg.DirList = d
+	}
+}
+
+func (di *Dir_v1) add(t []Thread_v1, b []Board_v1, d []Dir_v1) {
+	di.ThreadList = nil
+	di.BoardList = nil
+	di.DirList = nil
+
+	if len(t) > 0 {
+		di.ThreadList = t
+	}
+	if len(b) > 0 {
+		di.BoardList = b
+	}
+	if len(d) > 0 {
+		di.DirList = d
+	}
+}
+
+func (gm GroupMap_v1) syncResItems(req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
 	t := []Thread_v1{}
 	b := []Board_v1{}
 	d := []Dir_v1{}
 
-	for url, it := range load.tm {
+	for url, it := range gm.tm {
 		if re, ok := req.tm[url]; ok {
-			t = append(t, createSyncResThread(&it, &re))
+			t = append(t, it.createSyncRes(&re))
 		} else {
-			t = append(t, createSyncResThread(&it, nil))
+			t = append(t, it.createSyncRes(nil))
 		}
 	}
-	for _, it := range load.bm {
+	for _, it := range gm.bm {
 		b = append(b, it)
 	}
-	for name, it := range load.dm {
+	for name, it := range gm.dm {
 		if re, ok := req.dm[name]; ok {
-			d = append(d, createSyncResDir(&it, &re, name))
+			d = append(d, it.createSyncResDir(&re, name))
 		} else {
-			d = append(d, createSyncResDir(&it, nil, name))
+			d = append(d, it.createSyncResDir(nil, name))
 		}
 	}
 
@@ -1069,8 +1021,6 @@ func (m GroupMap_v1) isEmpty() bool {
 	return len(m.tm) == 0 && len(m.bm) == 0 && len(m.dm) == 0
 }
 
-
 /////////////////////////////////////////////////////////////////////
 // Sync2ch Version2
 /////////////////////////////////////////////////////////////////////
-
