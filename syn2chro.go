@@ -729,7 +729,6 @@ func mergeThreadGroup(tg *ThreadGroup_v1, gm GroupMap_v1) {
 
 func mergeDir(tg *Dir_v1, gm GroupMap_v1) {
 	m := make(map[string]int)
-	(*tg).DirList = []Dir_v1{}
 	for i, it := range (*tg).DirList {
 		m[it.Name] = i
 	}
