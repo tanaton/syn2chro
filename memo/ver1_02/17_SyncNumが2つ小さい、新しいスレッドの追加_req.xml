@@ -1,0 +1,18 @@
+
+<sync2ch_request sync_number="11" client_version="0.0.1b" client_name="ver1test.go" os="Lindows">
+	<thread_group category="open">
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1374727887/" title="test01" read="1" now="1" count="101"></thread>
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1372131847/" title="test02" read="1" now="1" count="102"></thread>
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1374984059/" title="test03" read="1" now="1" count="103"></thread>
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1366902081/" title="test04" read="1" now="1" count="104"></thread>
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1369941318/" title="test05" read="1" now="1" count="105"></thread>
+		<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1365954425/" title="test06" read="1" now="1" count="106"></thread>
+	</thread_group>
+	<thread_group category="favorite">
+		<board url="http://hoge.2ch.net/aaa/" title="board1"></board>
+		<dir name="お気に入り1">
+			<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1369941318/" title="test05" read="1" now="1" count="105"></thread>
+			<board url="http://hoge.2ch.net/aaa/" title="board1"></board>
+		</dir>
+	</thread_group>
+</sync2ch_request>

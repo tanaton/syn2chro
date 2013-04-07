@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -23,16 +22,17 @@ const (
 	CONFIG_JSON_PATH_DEF = "syn2chro.json"
 	FILE_DB_PREFIX       = "syn2chro"
 	FILE_DB_NUMBER_NAME  = "syn2chro_number.json"
+	FILE_ITEM_DB_NAME    = "syn2chro_item.json"
 )
 
 type User interface {
-	Auth(name, pass string) bool
-	GetPath(name, pass string) (string, error)
-	GetId(name, pass string) (int, error)
+	Auth(string, string) bool
+	GetPath(string, string) (string, error)
+	GetId(string, string) (int, error)
 }
 
 type Merge interface {
-	Merge(src1, src2 []byte) ([]byte, error)
+	Merge([]byte, []byte, []byte) ([]byte, error)
 }
 
 type DB interface {
@@ -40,6 +40,8 @@ type DB interface {
 	SetSyncNumber(string, int) error
 	GetData(string) ([]byte, error)
 	SetData(string, []byte) error
+	GetItemData(string) ([]byte, error)
+	SetItemData(string, []byte) error
 }
 
 type Config struct {
@@ -74,8 +76,8 @@ type SyncHandle struct {
 }
 
 type Session struct {
+	wbuf *bytes.Buffer
 	w    http.ResponseWriter
-	wbuf *bufio.Writer
 	r    *http.Request
 	user User
 	db   DB
@@ -84,6 +86,14 @@ type Session struct {
 /////////////////////////////////////////////////////////////////////
 // Sync2ch Version1
 /////////////////////////////////////////////////////////////////////
+type ItemMap_v1 struct {
+	ThreadMap map[string]int `json:"ThreadMap,omitempty"`
+	BoardMap  map[string]int `json:"BoardMap,omitempty"`
+	DirMap    map[string]int `json:"DirMap,omitempty"`
+	GroupMap  map[string]int `json:"GroupMap,omitempty"`
+	SyncNum   int            `json:"-"`
+}
+
 type Thread_v1 struct {
 	Status string `xml:"s,attr,omitempty"`
 	Url    string `xml:"url,attr"`
@@ -130,6 +140,7 @@ type Request_v1 struct {
 
 type Response_v1 struct {
 	XMLName xml.Name               `xml:"sync2ch_response"`
+	Result  string                 `xml:"result,attr"`
 	SyncNum int                    `xml:"sync_number,attr"`
 	Tg      []ThreadGroup_v1       `xml:"thread_group"`
 	TgMap   map[string]GroupMap_v1 `xml:"-"`
@@ -140,90 +151,8 @@ type Sync2ch_v1 struct {
 	req  Request_v1
 	save Request_v1
 	res  Response_v1
+	item ItemMap_v1
 }
-
-/////////////////////////////////////////////////////////////////////
-// Sync2ch Version2
-/////////////////////////////////////////////////////////////////////
-type Thread_v2 struct {
-	Id       int    `xml:"id,attr,omitempty"`
-	Status   string `xml:"s,attr,omitempty"`
-	Url      string `xml:"url,attr,omitempty"`
-	Title    string `xml:"title,attr,omitempty"`
-	Read     int    `xml:"read,attr,omitempty"`
-	Now      int    `xml:"now,attr,omitempty"`
-	Count    int    `xml:"count,attr,omitempty"`
-	ReadTime int    `xml:"rt,attr,omitempty"`
-	PostTime int    `xml:"pt,attr,omitempty"`
-}
-
-type Board_v2 struct {
-	Id    int    `xml:"id,attr,omitempty"`
-	Url   string `xml:"url,attr,omitempty"`
-	Title string `xml:"title,attr,omitempty"`
-}
-
-type Dir_v2 struct {
-	Name       string      `xml:"name,attr"`
-	IdList     string      `xml:"id_list,attr"`
-	Status     string      `xml:"s,attr"`
-	ThreadList []Thread_v2 `xml:"th"`
-	BoardList  []Board_v2  `xml:"bd"`
-	DirList    []Dir_v2    `xml:"dir"` // 入れ子にできる
-}
-
-type ThreadGroup_v2 struct {
-	Cate       string      `xml:"category,attr"`
-	IdList     string      `xml:"id_list,attr"`
-	Status     string      `xml:"s,attr"`
-	ThreadList []Thread_v2 `xml:"th"`
-	BoardList  []Board_v2  `xml:"bd"`
-	DirList    []Dir_v2    `xml:"dir"`
-}
-
-type Entities_v2 struct {
-	ThreadList []Thread_v2 `xml:"th"`
-	BoardList  []Board_v2  `xml:"bd"`
-}
-
-type GroupMap_v2 struct {
-	tm map[string]Thread_v2
-	bm map[string]Board_v2
-	dm map[string]GroupMap_v2
-}
-
-type Request_v2 struct {
-	XMLName    xml.Name               `xml:"sync2ch_request"`
-	SyncNum    int                    `xml:"sync_number,attr"`
-	ClientId   int                    `xml:"client_id,attr"`
-	ClientName string                 `xml:"client_name,attr"`
-	ClientVer  string                 `xml:"client_version,attr"`
-	Os         string                 `xml:"os,attr"`
-	Device     string                 `xml:"device,attr"`
-	SyncRes    string                 `xml:"sync_rl,attr"`
-	Tg         []ThreadGroup_v2       `xml:"thread_group"`
-	Entities   Entities_v2            `xml:"entities"`
-	TgMap      map[string]GroupMap_v2 `xml:"-"`
-}
-
-type Response_v2 struct {
-	XMLName  xml.Name               `xml:"sync2ch_response"`
-	SyncNum  int                    `xml:"sync_number,attr"`
-	Result   string                 `xml:"result,attr"`
-	Tg       []ThreadGroup_v2       `xml:"thread_group"`
-	Entities Entities_v2            `xml:"entities"`
-	TgMap    map[string]GroupMap_v2 `xml:"-"`
-}
-
-type Sync2ch_v2 struct {
-	load Request_v2
-	req  Request_v2
-	save Request_v2
-	res  Response_v2
-	id   int
-}
-
-/////////////////////////////////////////////////////////////////////
 
 var g_log *log.Logger
 var g_debug bool
@@ -234,7 +163,7 @@ func main() {
 	if c.LogFilePath == "" {
 		w = os.Stdout
 	} else {
-		fp, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		fp, err := os.OpenFile(c.LogFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0744)
 		if err != nil {
 			log.Fatal("file open error")
 		}
@@ -261,8 +190,8 @@ func main() {
 
 func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ses := &Session{
+		wbuf: &bytes.Buffer{},
 		w:    w,
-		wbuf: bufio.NewWriterSize(w, 1024*1024),
 		r:    r,
 		user: &OneUser{
 			name: h.conf.Name,
@@ -275,13 +204,12 @@ func (h *SyncHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Version1
 	code, err := ses.execVer1()
-	//code, err := ses.execVer2()
 	ses.statusCode(code)
 	if err != nil {
 		debugPrint(err.Error())
 	}
 	// データの送信
-	ses.wbuf.Flush()
+	io.Copy(ses.w, ses.wbuf)
 }
 
 func (ses *Session) execVer1() (code int, reterr error) {
@@ -319,18 +247,32 @@ func (ses *Session) execVer1Sync(name, pass string) (int, error) {
 	path, _ := ses.user.GetPath(name, pass)
 	// DBから最新の同期情報を取得
 	motodata, err := ses.db.GetData(path)
+	snum := ses.db.GetSyncNumber(path)
 	if err != nil {
-		if ses.db.GetSyncNumber(path) < 0 {
+		if snum < 0 {
 			motodata = nil
 		} else {
 			// 初期同期じゃないのにデータの読み込みに失敗
 			return http.StatusInternalServerError, err // 500
 		}
 	}
+	// アイテムデータの読み込み
+	itemdata, err := ses.db.GetItemData(path)
+	if err != nil {
+		itemdata = []byte("{}")
+	}
 
 	// 解析
-	sync := &Sync2ch_v1{}
-	d1, d2, err := sync.Merge(motodata, reqdata)
+	sync := &Sync2ch_v1{
+		item: ItemMap_v1{
+			ThreadMap: make(map[string]int),
+			BoardMap:  make(map[string]int),
+			DirMap:    make(map[string]int),
+			GroupMap:  make(map[string]int),
+			SyncNum:   snum,
+		},
+	}
+	d1, d2, d3, err := sync.Merge(reqdata, itemdata, motodata)
 	if err != nil {
 		return http.StatusInternalServerError, err // 500
 	}
@@ -345,66 +287,26 @@ func (ses *Session) execVer1Sync(name, pass string) (int, error) {
 	if err != nil {
 		return http.StatusInternalServerError, err // 500
 	}
-
-	// クライアントへ送信
-	err = ses.send(d2)
+	// アイテムデータの保存
+	err = ses.db.SetItemData(path, d2)
 	if err != nil {
 		return http.StatusInternalServerError, err // 500
 	}
-	debugPrint(string(d2))
+
+	// クライアントへ送信
+	err = ses.send(d3)
+	if err != nil {
+		return http.StatusInternalServerError, err // 500
+	}
+	debugPrint(string(d3))
 
 	return http.StatusOK, nil
-}
-
-func (ses *Session) execVer2() (code int, reterr error) {
-	// 認証
-	name, pass, err := ses.auth()
-	if err == nil {
-		// 認証成功
-		switch ses.r.URL.Path {
-		case "/api/sync2":
-			// 同期する
-			if ses.r.Method == "POST" {
-				code, reterr = ses.execVer2Sync(name, pass)
-			} else {
-				code = http.StatusNotImplemented // 501
-			}
-		case "/api/auth2":
-			// クライアントID発行
-			if ses.r.Method == "GET" {
-				code, reterr = ses.execVer2Auth(name, pass)
-			} else {
-				code = http.StatusNotImplemented // 501
-			}
-		default:
-			code = http.StatusNotFound
-		}
-	} else {
-		// 認証失敗
-		code, reterr = http.StatusUnauthorized, err // 401
-	}
-	return
-}
-
-func (ses *Session) execVer2Sync(name, pass string) (int, error) {
-	return http.StatusInternalServerError, errors.New("Not implemented")
-}
-
-func (ses *Session) execVer2Auth(name, pass string) (code int, reterr error) {
-	id, err := ses.user.GetId(name, pass)
-	if err == nil {
-		ses.w.Header().Set("Sync2ch-Client-ID", strconv.Itoa(id))
-		code, reterr = http.StatusOK, nil // 200
-	} else {
-		code, reterr = http.StatusUnauthorized, err // 401
-	}
-	return
 }
 
 func (ses *Session) statusCode(code int) {
 	// ステータスコード出力
 	ses.w.WriteHeader(code)
-	g_log.Printf("%s - \"%s %s %s\" code:%d in:%d out:%d", ses.r.RemoteAddr, ses.r.Method, ses.r.RequestURI, ses.r.Proto, code, ses.r.ContentLength, ses.wbuf.Buffered())
+	g_log.Printf("%s - \"%s %s %s\" code:%d in:%d out:%d", ses.r.RemoteAddr, ses.r.Method, ses.r.RequestURI, ses.r.Proto, code, ses.r.ContentLength, ses.wbuf.Len())
 }
 
 func (ses *Session) auth() (name, pass string, err error) {
@@ -462,7 +364,7 @@ func (ses *Session) send(data []byte) (reterr error) {
 		}
 	} else {
 		// 普通に送る
-		ses.wbuf.Write([]byte(xml.Header))
+		ses.wbuf.WriteString(xml.Header)
 		ses.wbuf.Write(data)
 	}
 	return
@@ -471,7 +373,7 @@ func (ses *Session) send(data []byte) (reterr error) {
 // ちゃんとしたDBとかに後々対応できるように…
 
 func (db *FileDB) GetSyncNumber(name string) int {
-	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
+	p := db.createUserPath(name) + "/" + FILE_DB_NUMBER_NAME
 	filedata, err := ioutil.ReadFile(p)
 	if err != nil {
 		return -1
@@ -485,7 +387,7 @@ func (db *FileDB) GetSyncNumber(name string) int {
 }
 
 func (db *FileDB) SetSyncNumber(name string, num int) (reterr error) {
-	p := db.root + "/" + name + "/" + FILE_DB_NUMBER_NAME
+	p := db.createUserPath(name) + "/" + FILE_DB_NUMBER_NAME
 	dbn := FileDBNumber{
 		SyncNum: float64(num),
 	}
@@ -507,7 +409,7 @@ func (db *FileDB) SetSyncNumber(name string, num int) (reterr error) {
 
 func (db *FileDB) GetData(name string) ([]byte, error) {
 	var data []byte
-	p, err := db.createPath(name)
+	p, err := db.createDataPath(name)
 	if err == nil {
 		data, err = ioutil.ReadFile(p)
 	}
@@ -515,20 +417,52 @@ func (db *FileDB) GetData(name string) ([]byte, error) {
 }
 
 func (db *FileDB) SetData(name string, data []byte) error {
-	p, err := db.createPath(name)
+	p, err := db.createDataPath(name)
 	if err == nil {
-		err = ioutil.WriteFile(p, data, 0744)
+		err = db.checkPath(p)
+		if err == nil {
+			err = ioutil.WriteFile(p, data, 0744)
+		}
 	}
 	return err
 }
 
-func (db *FileDB) createPath(name string) (string, error) {
+func (db *FileDB) GetItemData(name string) ([]byte, error) {
+	var data []byte
+	p, err := db.createItemDataPath(name)
+	if err == nil {
+		data, err = ioutil.ReadFile(p)
+	}
+	return data, err
+}
+
+func (db *FileDB) SetItemData(name string, data []byte) error {
+	p, err := db.createItemDataPath(name)
+	if err == nil {
+		err = db.checkPath(p)
+		if err == nil {
+			err = ioutil.WriteFile(p, data, 0744)
+		}
+	}
+	return err
+}
+
+func (db *FileDB) createDataPath(name string) (string, error) {
 	num := db.GetSyncNumber(name)
 	if num < 0 {
 		return "", errors.New("sync number error")
 	}
-	p := fmt.Sprintf("%s/%s/%s_%d.xml", db.root, name, FILE_DB_PREFIX, num)
-	return p, db.checkPath(p)
+	p := fmt.Sprintf("%s/%s_%d.xml", db.createUserPath(name), FILE_DB_PREFIX, num)
+	return p, nil
+}
+
+func (db *FileDB) createItemDataPath(name string) (string, error) {
+	p := db.createUserPath(name) + "/" + FILE_ITEM_DB_NAME
+	return p, nil
+}
+
+func (db *FileDB) createUserPath(name string) string {
+	return db.root + "/" + name
 }
 
 func (db *FileDB) checkPath(path string) (reterr error) {
@@ -591,14 +525,18 @@ func debugPrint(str string) {
 /////////////////////////////////////////////////////////////////////
 // Sync2ch Version1
 /////////////////////////////////////////////////////////////////////
-func (v1 *Sync2ch_v1) Merge(src1, src2 []byte) (d1, d2 []byte, reterr error) {
+func (v1 *Sync2ch_v1) Merge(src1, src2, src3 []byte) (d1, d2, d3 []byte, reterr error) {
 	// バイト列から変換
-	reterr = xml.Unmarshal(src2, &v1.req)
+	reterr = xml.Unmarshal(src1, &v1.req)
 	if reterr != nil {
 		return
 	}
-	if src1 != nil {
-		reterr = xml.Unmarshal(src1, &v1.load)
+	reterr = json.Unmarshal(src2, &v1.item)
+	if reterr != nil {
+		return
+	}
+	if src3 != nil {
+		reterr = xml.Unmarshal(src3, &v1.load)
 		if reterr != nil {
 			return
 		}
@@ -611,14 +549,14 @@ func (v1 *Sync2ch_v1) Merge(src1, src2 []byte) (d1, d2 []byte, reterr error) {
 	// バイト列に変換
 	d1, reterr = xml.MarshalIndent(&v1.save, "", "\t")
 	if reterr != nil {
-		d1 = nil
-		d2 = nil
 		return
 	}
-	d2, reterr = xml.MarshalIndent(&v1.res, "", "\t")
+	d2, reterr = json.MarshalIndent(&v1.item, "", "\t")
 	if reterr != nil {
-		d1 = nil
-		d2 = nil
+		return
+	}
+	d3, reterr = xml.MarshalIndent(&v1.res, "", "\t")
+	if reterr != nil {
 		return
 	}
 	return
@@ -631,6 +569,13 @@ func (v1 *Sync2ch_v1) update() {
 		v1.req.TgMap = convertMap(v1.req.Tg)
 		v1.createResponseUpdate()
 		v1.mergeRequest()
+		// アイテムの履歴を更新
+		for _, it := range v1.req.Tg {
+			if m, ok := v1.req.TgMap[it.Cate]; ok {
+				(&v1.item).update(m)
+			}
+			(&v1.item).setGroup(it.Cate)
+		}
 	} else if v1.load.SyncNum > v1.req.SyncNum {
 		// 同期
 		v1.load.TgMap = convertMap(v1.load.Tg)
@@ -639,16 +584,22 @@ func (v1 *Sync2ch_v1) update() {
 		v1.mergeRequestDiff()
 	} else {
 		// サーバの方が小さい番号になることはありえないはず…
-		// とりあえず大きい数字に更新
-		v1.load.SyncNum = v1.req.SyncNum
-		v1.save.SyncNum = v1.req.SyncNum
+		// 情報の更新
 		v1.req.TgMap = convertMap(v1.req.Tg)
 		v1.createResponseUpdate()
 		v1.mergeRequest()
+		// アイテムの履歴を更新
+		for _, it := range v1.req.Tg {
+			if m, ok := v1.req.TgMap[it.Cate]; ok {
+				(&v1.item).update(m)
+			}
+			(&v1.item).setGroup(it.Cate)
+		}
 	}
 	v1.save.ClientVer = v1.req.ClientVer
 	v1.save.ClientName = v1.req.ClientName
 	v1.save.Os = v1.req.Os
+	v1.res.Result = "ok"
 }
 
 func (v1 *Sync2ch_v1) mergeRequest() {
@@ -675,12 +626,24 @@ func (v1 *Sync2ch_v1) mergeRequestDiff() {
 		if index, ok := m[it.Cate]; ok {
 			sm := v1.save.Tg[index].convertGroupMap()
 			if rm, rmok := v1.req.TgMap[it.Cate]; rmok {
-				tmp := rm.diff(sm)
-				(&(v1.save.Tg[index])).merge(tmp)
+				tg := &(v1.save.Tg[index])
+				dir := Dir_v1{
+					ThreadList: tg.ThreadList,
+					BoardList:  tg.BoardList,
+					DirList:    tg.DirList,
+				}
+				(&dir).merge(rm.diff(sm), v1.item)
+				tg.ThreadList = dir.ThreadList
+				tg.BoardList = dir.BoardList
+				tg.DirList = dir.DirList
 			}
 		} else {
-			// 後ろに伸びるだけだからインデックスは狂わないはず
-			v1.save.Tg = append(v1.save.Tg, it)
+			if v1.item.isNewGroup(it.Cate) {
+				// 新しいグループの場合無条件で追加
+				// 後ろに伸びるだけだからインデックスは狂わないはず
+				v1.save.Tg = append(v1.save.Tg, it)
+				v1.item.setGroup(it.Cate)
+			}
 		}
 	}
 }
@@ -706,11 +669,9 @@ func (v1 *Sync2ch_v1) createResponseSync() {
 			// 最新版には無いカテゴリーのもよう
 			it = re
 		}
-		add = append(add, it.createSyncResThreadGroup(re, key))
+		add = append(add, it.createSyncResThreadGroup(re, v1.item, key))
 	}
 	v1.res.Tg = add
-	// TODO:SyncNumの更新条件を確認
-	//v1.res.SyncNum = v1.save.SyncNum
 	v1.updateSyncNumber()
 }
 
@@ -768,11 +729,7 @@ func (req GroupMap_v1) createUpdateResThreadGroup(key string) ThreadGroup_v1 {
 	return data
 }
 
-func (req GroupMap_v1) createUpdateResList() ([]Thread_v1, []Board_v1, []Dir_v1) {
-	t := []Thread_v1{}
-	b := []Board_v1{}
-	d := []Dir_v1{}
-
+func (req GroupMap_v1) createUpdateResList() (t []Thread_v1, b []Board_v1, d []Dir_v1) {
 	for _, it := range req.tm {
 		t = append(t, Thread_v1{
 			Url:    it.Url,
@@ -785,7 +742,7 @@ func (req GroupMap_v1) createUpdateResList() ([]Thread_v1, []Board_v1, []Dir_v1)
 	for na, it := range req.dm {
 		d = append(d, it.createUpdateResDir(na))
 	}
-	return t, b, d
+	return
 }
 
 func (t Thread_v1) createSyncRes(req *Thread_v1) Thread_v1 {
@@ -817,7 +774,7 @@ func (t Thread_v1) createSyncRes(req *Thread_v1) Thread_v1 {
 	return ret
 }
 
-func (gm GroupMap_v1) createSyncResDir(req *GroupMap_v1, name string) Dir_v1 {
+func (gm GroupMap_v1) createSyncResDir(req *GroupMap_v1, im ItemMap_v1, name string) Dir_v1 {
 	var t []Thread_v1
 	var b []Board_v1
 	var d []Dir_v1
@@ -827,9 +784,6 @@ func (gm GroupMap_v1) createSyncResDir(req *GroupMap_v1, name string) Dir_v1 {
 
 	if req == nil {
 		// リクエストには無いフォルダ
-		t = []Thread_v1{}
-		b = []Board_v1{}
-		d = []Dir_v1{}
 		for _, it := range gm.tm {
 			t = append(t, it.createSyncRes(nil))
 		}
@@ -837,86 +791,66 @@ func (gm GroupMap_v1) createSyncResDir(req *GroupMap_v1, name string) Dir_v1 {
 			b = append(b, it)
 		}
 		for na, it := range gm.dm {
-			d = append(d, it.createSyncResDir(nil, na))
+			d = append(d, it.createSyncResDir(nil, im, na))
 		}
 	} else {
-		t, b, d = gm.createSyncResList(*req)
+		t, b, d = gm.createSyncResList(*req, im)
 	}
 
 	(&data).add(t, b, d)
 	return data
 }
 
-func (gm GroupMap_v1) createSyncResThreadGroup(req GroupMap_v1, key string) ThreadGroup_v1 {
+func (gm GroupMap_v1) createSyncResThreadGroup(req GroupMap_v1, im ItemMap_v1, key string) ThreadGroup_v1 {
 	data := ThreadGroup_v1{
 		Cate: key,
 	}
-	t, b, d := gm.createSyncResList(req)
+	t, b, d := gm.createSyncResList(req, im)
 	(&data).add(t, b, d)
 	return data
 }
 
-func (gm GroupMap_v1) createSyncResList(req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
+func (gm GroupMap_v1) createSyncResList(req GroupMap_v1, im ItemMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
 	// サーバ側のアイテム
-	t, b, d := gm.syncResItems(req)
+	t, b, d := gm.syncResItems(req, im)
 	// リクエスト側にのみ存在するアイテム
-	tmp_req := req.diff(gm)
-	t2, b2, d2 := tmp_req.syncResItems(req)
+	t2, b2, d2 := req.diff(gm).syncResItemsReqOnly(im)
 	t = append(t, t2...)
 	b = append(b, b2...)
+	// TODO:階層を維持してマージする必要がある
 	d = append(d, d2...)
 	return t, b, d
 }
 
-func (tg *ThreadGroup_v1) merge(gm GroupMap_v1) {
-	m := make(map[string]int)
-	for i, it := range tg.DirList {
-		m[it.Name] = i
-	}
-
-	for _, it := range gm.tm {
-		tg.ThreadList = append(tg.ThreadList, it)
-	}
-	for _, it := range gm.bm {
-		tg.BoardList = append(tg.BoardList, it)
-	}
-	for name, it := range gm.dm {
-		if index, ok := m[name]; ok {
-			(&(tg.DirList[index])).merge(it)
-		} else {
-			dir := Dir_v1{Name: name}
-			(&dir).merge(it)
-			tg.DirList = append(tg.DirList, dir)
-		}
-	}
-	if len((*tg).DirList) == 0 {
-		tg.DirList = nil
-	}
-}
-
-func (di *Dir_v1) merge(gm GroupMap_v1) {
+func (di *Dir_v1) merge(gm GroupMap_v1, im ItemMap_v1) {
 	m := make(map[string]int)
 	for i, it := range di.DirList {
 		m[it.Name] = i
 	}
 
-	for _, it := range gm.tm {
-		di.ThreadList = append(di.ThreadList, it)
-	}
-	for _, it := range gm.bm {
-		di.BoardList = append(di.BoardList, it)
-	}
-	for name, it := range gm.dm {
-		if index, ok := m[name]; ok {
-			(&(di.DirList[index])).merge(it)
-		} else {
-			dir := Dir_v1{Name: name}
-			(&dir).merge(it)
-			di.DirList = append(di.DirList, dir)
+	for url, it := range gm.tm {
+		if im.isNewThread(url) {
+			di.ThreadList = append(di.ThreadList, it)
+			im.setThread(url)
 		}
 	}
-	if len(di.DirList) == 0 {
-		di.DirList = nil
+	for url, it := range gm.bm {
+		if im.isNewBoard(url) {
+			di.BoardList = append(di.BoardList, it)
+			im.setBoard(url)
+		}
+	}
+	for name, it := range gm.dm {
+		if im.isNewDir(name) {
+			if index, ok := m[name]; ok {
+				(&(di.DirList[index])).merge(it, im)
+			} else {
+				dir := Dir_v1{Name: name}
+				(&dir).merge(it, im)
+				di.DirList = append(di.DirList, dir)
+			}
+			im.setDir(name)
+		}
 	}
 }
 
@@ -952,11 +886,7 @@ func (di *Dir_v1) add(t []Thread_v1, b []Board_v1, d []Dir_v1) {
 	}
 }
 
-func (gm GroupMap_v1) syncResItems(req GroupMap_v1) ([]Thread_v1, []Board_v1, []Dir_v1) {
-	t := []Thread_v1{}
-	b := []Board_v1{}
-	d := []Dir_v1{}
-
+func (gm GroupMap_v1) syncResItems(req GroupMap_v1, im ItemMap_v1) (t []Thread_v1, b []Board_v1, d []Dir_v1) {
 	for url, it := range gm.tm {
 		if re, ok := req.tm[url]; ok {
 			t = append(t, it.createSyncRes(&re))
@@ -969,13 +899,32 @@ func (gm GroupMap_v1) syncResItems(req GroupMap_v1) ([]Thread_v1, []Board_v1, []
 	}
 	for name, it := range gm.dm {
 		if re, ok := req.dm[name]; ok {
-			d = append(d, it.createSyncResDir(&re, name))
+			d = append(d, it.createSyncResDir(&re, im, name))
 		} else {
-			d = append(d, it.createSyncResDir(nil, name))
+			d = append(d, it.createSyncResDir(nil, im, name))
 		}
 	}
+	return
+}
 
-	return t, b, d
+func (gm GroupMap_v1) syncResItemsReqOnly(im ItemMap_v1) (t []Thread_v1, b []Board_v1, d []Dir_v1) {
+	for url, it := range gm.tm {
+		if im.isNewThread(url) {
+			t = append(t, it.createSyncRes(nil))
+		}
+	}
+	for url, it := range gm.bm {
+		if im.isNewBoard(url) {
+			b = append(b, it)
+		}
+	}
+	for name, it := range gm.dm {
+		// TODO:階層を考慮する必要があるかも
+		if im.isNewDir(name) {
+			d = append(d, it.createSyncResDir(nil, im, name))
+		}
+	}
+	return
 }
 
 func (m GroupMap_v1) diff(src GroupMap_v1) GroupMap_v1 {
@@ -1021,6 +970,54 @@ func (m GroupMap_v1) isEmpty() bool {
 	return len(m.tm) == 0 && len(m.bm) == 0 && len(m.dm) == 0
 }
 
-/////////////////////////////////////////////////////////////////////
-// Sync2ch Version2
-/////////////////////////////////////////////////////////////////////
+func (s *ItemMap_v1) update(m GroupMap_v1) {
+	for key, _ := range m.tm {
+		s.setThread(key)
+	}
+	for key, _ := range m.bm {
+		s.setBoard(key)
+	}
+	for key, _ := range m.dm {
+		s.setDir(key)
+		// TODO:再帰的にアップデートする必要があるかも
+		//s.update(it)
+	}
+}
+
+func (s *ItemMap_v1) setThread(url string) { s.ThreadMap[url] = s.SyncNum }
+func (s *ItemMap_v1) setBoard(url string)  { s.BoardMap[url] = s.SyncNum }
+func (s *ItemMap_v1) setDir(name string)   { s.DirMap[name] = s.SyncNum }
+func (s *ItemMap_v1) setGroup(cate string) { s.GroupMap[cate] = s.SyncNum }
+
+func (s ItemMap_v1) isNewThread(url string) bool {
+	n, ok := s.ThreadMap[url]
+	return s.checkNewItem(n, ok)
+}
+
+func (s ItemMap_v1) isNewBoard(url string) bool {
+	n, ok := s.BoardMap[url]
+	return s.checkNewItem(n, ok)
+}
+
+func (s ItemMap_v1) isNewDir(name string) bool {
+	n, ok := s.DirMap[name]
+	return s.checkNewItem(n, ok)
+}
+
+func (s ItemMap_v1) isNewGroup(cate string) bool {
+	n, ok := s.GroupMap[cate]
+	return s.checkNewItem(n, ok)
+}
+
+func (s ItemMap_v1) checkNewItem(n int, ok bool) (ret bool) {
+	ret = false
+	if ok {
+		if n <= (s.SyncNum - 9) {
+			ret = true
+		}
+	} else {
+		ret = true
+	}
+	return
+}
+

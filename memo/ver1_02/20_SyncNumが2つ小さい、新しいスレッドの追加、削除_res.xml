@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<sync2ch_response result="ok" sync_number="16">
+<thread_group category="open">
+<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1374727887/" s="n" />
+<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1372131847/" s="n" />
+<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1365954425/" s="n" />
+<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1371122540/" s="n" />
+</thread_group>
+<thread_group category="favorite">
+<board url="http://hoge.2ch.net/aaa/" title="board1" />
+<dir name="お気に入り1">
+<thread url="http://hoge.2ch.net/read.cgi/test/aaa/1369941318/" s="n" />
+<board url="http://hoge.2ch.net/aaa/" title="board1" />
+</dir>
+</thread_group>
+</sync2ch_response>

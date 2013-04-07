@@ -365,7 +365,7 @@ func main() {
 func sync(id, pass string, data []byte) ([]byte, error) {
 	body := bytes.NewBuffer(data)
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", "http://localhost/api/sync1", body)
+	req, err := http.NewRequest("POST", "http://sync2ch.com/api/sync1", body)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<sync2ch_response result="ok" sync_number="2">
+<thread_group category="open">
+</thread_group>
+<thread_group category="favorite">
+</thread_group>
+</sync2ch_response>

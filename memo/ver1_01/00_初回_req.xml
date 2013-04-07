@@ -1,0 +1,5 @@
+
+<sync2ch_request sync_number="0" client_version="0.0.1b" client_name="ver1test.go" os="Lindows">
+	<thread_group category="open"></thread_group>
+	<thread_group category="favorite"></thread_group>
+</sync2ch_request>

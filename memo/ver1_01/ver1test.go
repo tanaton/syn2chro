@@ -62,7 +62,6 @@ var g_XMLName xml.Name = xml.Name{
 }
 
 func main() {
-	new_cate := "favo" + strconv.Itoa(rand.Intn(1000000))
 	g_Thread1 := createThread(1)
 	g_Thread2 := createThread(2)
 	g_Thread3 := createThread(3)
@@ -94,6 +93,9 @@ func main() {
 		ThreadList: []Thread_v1{g_Thread5},
 		BoardList:  []Board_v1{g_Board1},
 		DirList:    []Dir_v1{g_Dir1},
+	}
+	g_Dir3 := Dir_v1{
+		Name:       "お気に入り3",
 	}
 	set_req_moto := Request_v1{ // 元に戻す
 		Subject: "元に戻す",
@@ -153,7 +155,6 @@ func main() {
 						g_Thread2,
 						g_Thread3,
 						g_Thread4,
-						g_Thread5,
 					},
 				},
 				ThreadGroup_v1{
@@ -164,7 +165,65 @@ func main() {
 			},
 		},
 		get_req_data,	// 情報取得
-		set_req_moto,	// 元に戻す
+		Request_v1{		// スレッド削除
+			Subject: "スレッド削除",
+			Tg: []ThreadGroup_v1{
+				ThreadGroup_v1{
+					Cate: "open",
+					ThreadList: []Thread_v1{
+						g_Thread1,
+						g_Thread2,
+					},
+				},
+				ThreadGroup_v1{
+					Cate:      "favorite",
+					BoardList: []Board_v1{g_Board1},
+					DirList:   []Dir_v1{g_Dir1},
+				},
+			},
+		},
+		get_req_data,	// 情報取得
+		Request_v1{		// SyncNumが1つ小さい、新しいスレッドの追加
+			Subject: "SyncNumが1つ小さい、新しいスレッドの追加",
+			SyncNumOffset: -1,
+			Tg: []ThreadGroup_v1{
+				ThreadGroup_v1{
+					Cate: "open",
+					ThreadList: []Thread_v1{
+						g_Thread1,
+						g_Thread2,
+						g_Thread3,
+					},
+				},
+				ThreadGroup_v1{
+					Cate:      "favorite",
+					BoardList: []Board_v1{g_Board1},
+					DirList:   []Dir_v1{g_Dir1},
+				},
+			},
+		},
+		get_req_data,	// 情報取得
+		Request_v1{		// SyncNumが2つ小さい、新しいスレッドの追加
+			Subject: "SyncNumが2つ小さい、新しいスレッドの追加",
+			SyncNumOffset: -2,
+			Tg: []ThreadGroup_v1{
+				ThreadGroup_v1{
+					Cate: "open",
+					ThreadList: []Thread_v1{
+						g_Thread1,
+						g_Thread2,
+						g_Thread3,
+						g_Thread4,
+					},
+				},
+				ThreadGroup_v1{
+					Cate:      "favorite",
+					BoardList: []Board_v1{g_Board1},
+					DirList:   []Dir_v1{g_Dir1},
+				},
+			},
+		},
+		get_req_data,	// 情報取得
 		Request_v1{		// SyncNumが2つ小さい、新しいカテゴリの追加
 			Subject: "SyncNumが2つ小さい、新しいカテゴリの追加",
 			SyncNumOffset: -2,
@@ -185,7 +244,7 @@ func main() {
 					DirList:   []Dir_v1{g_Dir1},
 				},
 				ThreadGroup_v1{
-					Cate:      new_cate,
+					Cate:      "favo" + strconv.Itoa(rand.Intn(1000000)),
 					BoardList: []Board_v1{
 						g_Board1,
 						g_Board2,
@@ -194,9 +253,10 @@ func main() {
 				},
 			},
 		},
-		Request_v1{
-			Subject: "情報取得用、新しいカテゴリに対応",
-			SyncNumOffset: -2,
+		get_req_data,	// 情報取得
+		Request_v1{		// SyncNumが1つ大きい
+			Subject: "SyncNumが1つ大きい",
+			SyncNumOffset: 1,
 			Tg: []ThreadGroup_v1{
 				ThreadGroup_v1{
 					Cate: "open",
@@ -211,22 +271,57 @@ func main() {
 					BoardList: []Board_v1{g_Board1},
 					DirList:   []Dir_v1{g_Dir1},
 				},
-				ThreadGroup_v1{Cate: new_cate},
 			},
 		},
+		get_req_data,	// 情報取得
 		set_req_moto,	// 元に戻す
-		Request_v1{		// SyncNumが1つ大きい
-			Subject: "SyncNumが1つ大きい",
-			SyncNumOffset: 1,
+		Request_v1{		// Read更新
+			Subject: "Read更新",
+			Tg: []ThreadGroup_v1{
+				ThreadGroup_v1{
+					Cate: "open",
+					ThreadList: []Thread_v1{
+						g_Thread1_2,
+						g_Thread2,
+						g_Thread3,
+					},
+				},
+				ThreadGroup_v1{
+					Cate:      "favorite",
+					BoardList: []Board_v1{g_Board1},
+					DirList:   []Dir_v1{g_Dir1},
+				},
+			},
+		},
+		get_req_data,	// 情報取得
+		Request_v1{		// Now更新
+			Subject: "Now更新",
+			Tg: []ThreadGroup_v1{
+				ThreadGroup_v1{
+					Cate: "open",
+					ThreadList: []Thread_v1{
+						g_Thread1,
+						g_Thread2_2,
+						g_Thread3,
+					},
+				},
+				ThreadGroup_v1{
+					Cate:      "favorite",
+					BoardList: []Board_v1{g_Board1},
+					DirList:   []Dir_v1{g_Dir1},
+				},
+			},
+		},
+		get_req_data,	// 情報取得
+		Request_v1{		// Count更新
+			Subject: "Count更新",
 			Tg: []ThreadGroup_v1{
 				ThreadGroup_v1{
 					Cate: "open",
 					ThreadList: []Thread_v1{
 						g_Thread1,
 						g_Thread2,
-						g_Thread3,
-						g_Thread4,
-						g_Thread5,
+						g_Thread3_2,
 					},
 				},
 				ThreadGroup_v1{
@@ -283,9 +378,8 @@ func main() {
 		},
 		get_req_data,	// 情報取得
 		set_req_moto,	// 元に戻す
-		Request_v1{		// SyncNumが2つ小さい、昔追加したスレッドの追加
-			Subject: "SyncNumが2つ小さい、新しいスレッドの追加",
-			SyncNumOffset: -2,
+		Request_v1{		// 空フォルダ追加
+			Subject: "空フォルダ追加",
 			Tg: []ThreadGroup_v1{
 				ThreadGroup_v1{
 					Cate: "open",
@@ -293,32 +387,8 @@ func main() {
 						g_Thread1,
 						g_Thread2,
 						g_Thread3,
-						g_Thread4,
-						g_Thread5,
-						g_Thread6,
 					},
-				},
-				ThreadGroup_v1{
-					Cate:      "favorite",
-					BoardList: []Board_v1{g_Board1},
-					DirList:   []Dir_v1{g_Dir1},
-				},
-			},
-		},
-		get_req_data,	// 情報取得
-		set_req_moto,	// 元に戻す
-		Request_v1{		// SyncNumが2つ小さい、昔追加したスレッドの追加
-			Subject: "SyncNumが2つ小さい、新しいスレッドの追加、削除",
-			SyncNumOffset: -2,
-			Tg: []ThreadGroup_v1{
-				ThreadGroup_v1{
-					Cate: "open",
-					ThreadList: []Thread_v1{
-						g_Thread1,
-						g_Thread2,
-						g_Thread6,
-						g_Thread7,
-					},
+					DirList:   []Dir_v1{g_Dir3},
 				},
 				ThreadGroup_v1{
 					Cate:      "favorite",
@@ -365,7 +435,7 @@ func main() {
 func sync(id, pass string, data []byte) ([]byte, error) {
 	body := bytes.NewBuffer(data)
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", "http://localhost/api/sync1", body)
+	req, err := http.NewRequest("POST", "http://sync2ch.com/api/sync1", body)
 	if err != nil {
 		return nil, err
 	}
